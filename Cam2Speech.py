@@ -58,7 +58,7 @@ def next_settings_menu(menu):
     return items[(items.index(menu) + 1) % len(items)]
 
 
-def speak_menu(menu): 
+def speak_menu(menu):
     text = {
         MainMenu.READ_NEW_TEXT: "Read new text",
         MainMenu.REPEAT_LAST_TEXT: "Repeat last text",
@@ -94,7 +94,13 @@ def change_sound_level():
 
 def stop_reading():
     subprocess.run(["pkill", "aplay"], check=False)
-    
+
+def wake_up():
+    subprocess.run(
+        'ffmpeg -loglevel error -f lavfi -i anullsrc=r=22050:cl=mono -t 0.25 -f wav - | aplay',
+        shell=True,
+        check=False
+    )
 
 # ----------------------------------------------------------
 # Settings menu
@@ -151,11 +157,11 @@ def main_loop():
     while True:
         if wait_for_touch_flag:
             wait_for_touch()
+            wake_up()
             print("Touch detected")
 
-        stop_reading() # stop any possible reading text    
-
         wait_for_touch_flag = False
+        stop_reading() # stop any possible reading text
         speak_menu(menu)
         event = wait_for_yes_no()
 
