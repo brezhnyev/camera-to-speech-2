@@ -154,29 +154,9 @@ The script starts automatically after boot.
 
 ---
 
-
-![Camera2Speech](./images/rpi4.jpg)
-
-___
-
-## Final version.
-
-Look of the device:
-
-![Final device](./images/device-final.jpg)
-
-Device on chest:
-
-![Device on chest](./images/device-chest.jpg)
-
-Camera - replaced USB cable by USB connector:
-
-![Device on chest](./images/camera.jpg)
-
-
 ### Typical CPU consumption.
 
-Idle (600000 Hz)
+Idle (600 MHz)
 
 <pre>
 pi@raspberrypi:~ $ mpstat -P ALL 1
@@ -202,10 +182,9 @@ Linux 6.12.93+rpt-rpi-v8 (raspberrypi)  24.07.2026      _aarch64_       (4 CPU)
 11:36:33       1    0,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00  100,00
 11:36:33       2    0,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00  100,00
 11:36:33       3    0,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00  100,00
-
 </pre>
 
-Full load (1000000 Hz ffmpeg+tesseract)
+Full load (1GHz ffmpeg+tesseract)
 
 <pre>
 11:40:33     CPU    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest  %gnice   %idle
@@ -228,10 +207,9 @@ Full load (1000000 Hz ffmpeg+tesseract)
 11:40:36       1   99,00    0,00    1,00    0,00    0,00    0,00    0,00    0,00    0,00    0,00
 11:40:36       2   26,53    0,00    0,00    1,02    0,00    0,00    0,00    0,00    0,00   72,45
 11:40:36       3   27,00    0,00    1,00    0,00    0,00    0,00    0,00    0,00    0,00   72,00
-
 </pre>
 
-Read aloud (1000000 Hz RHVoice+aplay)
+Read aloud (1GH RHVoice+aplay)
 <pre>
 11:42:48     CPU    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest  %gnice   %idle
 11:42:49     all    7,91    0,00    0,26    0,00    0,00    0,00    0,00    0,00    0,00   91,84
@@ -253,10 +231,9 @@ Read aloud (1000000 Hz RHVoice+aplay)
 11:42:51       1    4,21    0,00    3,16    0,00    0,00    0,00    0,00    0,00    0,00   92,63
 11:42:51       2    4,04    0,00    2,02    0,00    0,00    0,00    0,00    0,00    0,00   93,94
 11:42:51       3   90,10    0,00    8,91    0,00    0,00    0,00    0,00    0,00    0,00    0,99
-
 </pre>
 
-Raspi switches itself from 600MHz to 1GHz when more CPU resources are required.
+Raspi switches itself from 600 MHz to 1 GHz when more CPU resources are required.
 
 ### Temperature
 
@@ -325,7 +302,7 @@ Intensive use of algos (tesseract) may reduce the time significantly (expedted ~
 ![](./images/20260723_105429.jpg)
 ![](./images/20260723_112720.jpg)
 ![](./images/20260723_112740.jpg)
-![](./images/20260724_115743.jpg
+![](./images/20260724_115743.jpg)
 ![](./images/20260724_115818.jpg)
 ![](./images/20260724_115838.jpg)
 ![](./images/20260724_115919.jpg)
