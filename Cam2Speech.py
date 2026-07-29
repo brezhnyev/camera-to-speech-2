@@ -14,6 +14,9 @@ import re
 import wave
 import numpy as np
 import subprocess
+import os
+
+# os.setpriority(os.PRIO_PROCESS, 0, -10) # this causes interrupts (counter effect)
 
 # reduce image length & width by this factor before running OCR (speeds
 # things up on constrained hardware, at the cost of recognition accuracy on
@@ -286,8 +289,8 @@ def process_new_image():
     threading.Thread(target=speak_instruction, args=(Instructions.KEEP_CAMERA,)).start()
     subprocess.run(["rm", "-f", "text.txt", "img.png", "gray.png"], check=True)
     subprocess.run(["rpicam-still", "-t", "2000", "--width", "4608", "--height", "2592", "-o", "img.jpg"], check=True)
+    threading.Thread(target=speak_instruction, args=(Instructions.PHOTO_TAKEN,)).start()
     checkpoint("capture image")
-    threading.Thread(target=speak_text_streaming, args=("Photo taken, processing.",)).start()
 
     img = cv2.resize(
         cv2.rotate(
