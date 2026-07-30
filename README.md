@@ -47,7 +47,7 @@ The quality of the camera proved to be not good enough for text recognition. Exp
 
 ---
 
-[Raspberry Pi Setup Help](Raspberry_Pi_Setup_Help.md)
+[Raspberry Pi Setup](Raspberry_Pi_Setup.md)
 
 ---
 
