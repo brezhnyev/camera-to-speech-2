@@ -234,14 +234,14 @@ def speak_menu(menu):
         SettingsMenu.CHANGE_SOUND_LEVEL: "CHANGE_SOUND_LEVEL",
         SettingsMenu.LEAVE: "LEAVE",
     }[menu]
-    subprocess.run(["aplay", text + ".wav"], check=True)
+    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
 
 def speak_instruction(instruction):
     text = {
         Instructions.KEEP_CAMERA: "KEEP_CAMERA",
         Instructions.PHOTO_TAKEN: "PHOTO_TAKEN",
     }[instruction]
-    subprocess.run(["aplay", text + ".wav"], check=True)
+    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
             
 
 # ----------------------------------------------------------

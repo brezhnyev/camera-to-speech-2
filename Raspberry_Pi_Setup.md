@@ -28,7 +28,16 @@ rpicam-still -o test.jpg
 ## 3. APT packages
 
 ``` bash
-sudo apt install     git     python3-pip     python3-smbus     i2c-tools     imagemagick     sysstat     pipewire wireplumber pipewire-audio pipewire-pulse     pulseaudio-utils     libcamera-apps     tesseract-ocr     libgl1
+sudo apt install \
+    git \
+    python3-pip \
+    python3-smbus \
+    i2c-tools \
+    sysstat \
+    bluez-alsa-utils \
+    libcamera-apps \
+    tesseract-ocr \
+    libgl1
 ```
 
 ------------------------------------------------------------------------
