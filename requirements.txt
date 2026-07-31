@@ -1,4 +1,4 @@
 mpu6050-raspberrypi
 opencv-python==4.10.0.84
-tesserocr
+tesserocr<2.10
 piper-tts
