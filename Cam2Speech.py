@@ -1,4 +1,5 @@
 from email.mime import text
+import queue
 from mpu6050 import mpu6050
 from gpiozero import Button
 from piper.voice import PiperVoice
@@ -121,8 +122,6 @@ def wait_for_yes_no(timeout=5):
 # the previous one (pw-play drains from its stdin pipe/buffer concurrently,
 # so this overlap happens for free without any extra threads inside here).
 
-MAX_WORDS_PER_CHUNK = 10
-
 # trailing punctuation that marks a natural pause in speech
 BREAK_PUNCT_RE = re.compile(r"[.,:;!?…\-–—()\[\]\"'“”‘’]$")
 
@@ -144,7 +143,7 @@ BREAK_WORDS = {
 }
 
 
-def split_into_chunks(text, max_words=10):
+def split_into_chunks(text, max_words=20):
     words = text.split()
     chunks = []
 
@@ -169,37 +168,101 @@ def split_into_chunks(text, max_words=10):
     return chunks
 
 
+# -------- reading state, shared between speak_text_streaming() and stop_reading() --------
+# _stop_reading_event lets stop_reading() interrupt an in-progress
+# speak_text_streaming() call (both the piper synthesis loop and the pw-play
+# playback loop poll it and bail out early), and _reading_thread lets
+# stop_reading() block until that interruption has actually taken effect,
+# instead of just firing the stop signal and racing ahead.
+_stop_reading_event = threading.Event()
+_reading_thread = None
+
+
 def speak_text_streaming(text):
     chunks = split_into_chunks(text)
     if not chunks:
         return
 
-    player = subprocess.Popen(
-        [
-            "pw-play",
-            "--rate", str(piper_voice.config.sample_rate),
-            "--channels", "1",
-            "--format", "s16",
-            "-",
-        ],
-        stdin=subprocess.PIPE,
-    )
+    audio_queue = queue.Queue(maxsize=8)  # small buffer
 
-    try:
-        for chunk in chunks:
-            for audio_chunk in piper_voice.synthesize(chunk):
-                player.stdin.write(audio_chunk.audio_int16_bytes)
-    except (BrokenPipeError, OSError):
-        pass  # player was killed (e.g. via stop_reading()) - stop synthesizing
-    finally:
+    def generate():
         try:
-            player.stdin.close()
-        except OSError:
+            for chunk in chunks:
+                if _stop_reading_event.is_set():
+                    return
+                for audio_chunk in piper_voice.synthesize(chunk):
+                    if _stop_reading_event.is_set():
+                        return
+                    data = audio_chunk.audio_int16_bytes
+
+                    # avoid blocking forever on a full queue if playback
+                    # was stopped and nothing is draining it anymore
+                    while not _stop_reading_event.is_set():
+                        try:
+                            audio_queue.put(data, timeout=0.5)
+                            break
+                        except queue.Full:
+                            continue
+
+        finally:
+            try:
+                audio_queue.put_nowait(None)  # end marker
+            except queue.Full:
+                pass
+
+    def play():
+        player = subprocess.Popen(
+            [
+                "pw-play",
+                "--raw",
+                "--rate", str(piper_voice.config.sample_rate),
+                "--channels", "1",
+                "--format", "s16",
+                "-"
+            ],
+            stdin=subprocess.PIPE,
+        )
+
+        try:
+            while not _stop_reading_event.is_set():
+                try:
+                    data = audio_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                if data is None:
+                    break
+
+                player.stdin.write(data)
+
+        except (BrokenPipeError, OSError):
             pass
-        player.wait()
+
+        finally:
+            try:
+                player.stdin.close()
+            except OSError:
+                pass
+            if _stop_reading_event.is_set():
+                try:
+                    player.terminate()
+                except OSError:
+                    pass
+            player.wait()
+
+    producer = threading.Thread(target=generate)
+    consumer = threading.Thread(target=play)
+
+    producer.start()
+    consumer.start()
+
+    producer.join()
+    consumer.join()
 
 
 def read_text_file_aloud():
+    global _reading_thread
+
     try:
         with open("text.txt") as f:
             text = f.read()
@@ -212,7 +275,9 @@ def read_text_file_aloud():
     # run in the background so the main loop stays responsive (e.g. to
     # interrupt reading via stop_reading()), same as the previous `&`
     # backgrounded shell pipeline in readENG.sh.
-    threading.Thread(target=speak_text_streaming, args=(text,)).start()
+    _stop_reading_event.clear()
+    _reading_thread = threading.Thread(target=speak_text_streaming, args=(text,))
+    _reading_thread.start()
 
 
 def next_main_menu(menu):
@@ -462,7 +527,18 @@ def change_sound_level():
     print("Change sound level")
 
 def stop_reading():
+    global _reading_thread
+
+    # signal speak_text_streaming() to stop, then pkill in case it's
+    # currently blocked writing to pw-play's stdin (e.g. a full pipe buffer)
+    # so it can actually notice the signal and unwind - then block here
+    # until it has fully stopped, instead of racing ahead while it's still
+    # tearing down.
+    _stop_reading_event.set()
     subprocess.run(["pkill", "pw-play"], check=False)
+    if _reading_thread is not None:
+        _reading_thread.join()
+        _reading_thread = None
 
 # wake_up() plays a short blip of silence before the first real speech, to
 # "wake up" the (usually bluetooth) audio sink from standby - without it, the

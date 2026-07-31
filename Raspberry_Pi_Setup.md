@@ -28,39 +28,113 @@ rpicam-still -o test.jpg
 ## 3. APT packages
 
 ``` bash
-sudo apt install \
-    git \
-    python3-pip \
-    python3-smbus \
-    i2c-tools \
-    sysstat \
-    bluez-alsa-utils \
-    libcamera-apps \
-    tesseract-ocr \
-    libgl1
+sudo apt update && sudo apt install git python3-pip python3-smbus i2c-tools sysstat tesseract-ocr libgl1 pipewire wireplumber pipewire-audio pipewire-pulse libspa-0.2-bluetooth bluez
 ```
 
 ------------------------------------------------------------------------
 
-## 4. Bluetooth
+## 4. Bluetooth audio setup
 
-``` text
+# Bluetooth Audio Setup (PipeWire)
+
+## 1. Pair the headset (no reboot)
+
+Check that Bluetooth is not blocked:
+
+```bash
+rfkill list
+sudo rfkill unblock bluetooth
+```
+
+Pair the headset:
+
+```bash
 bluetoothctl
 power on
-agent on
-default-agent
 scan on
-pair <MAC>
-trust <MAC>
-connect <MAC>
+# wait until headset appears
+scan off
+pair XX:XX:XX:XX:XX:XX
+trust XX:XX:XX:XX:XX:XX
+connect XX:XX:XX:XX:XX:XX
 ```
 
-Check:
+If `connect` fails with:
 
-``` bash
+```
+org.bluez.Error.Failed br-connection-profile-unavailable
+```
+
+continue with the PipeWire setup.
+
+---
+
+## 2. Install PipeWire (logout/login or reboot recommended)
+
+Bluetooth audio (A2DP) **requires PipeWire**. ALSA (`aplay`) alone cannot play to a Bluetooth headset.
+
+```bash
+sudo apt install -y pipewire wireplumber pipewire-pulse libspa-0.2-bluetooth pulseaudio-utils
+```
+
+---
+
+## 3. Headless Raspberry Pi fix (restart WirePlumber or reboot)
+
+Create the configuration directory:
+
+```bash
+mkdir -p ~/.config/wireplumber/wireplumber.conf.d
+```
+
+Create:
+
+```
+~/.config/wireplumber/wireplumber.conf.d/50-bluez-no-seat.conf
+```
+
+Contents:
+
+```text
+wireplumber.profiles = {
+  main = {
+    monitor.bluez.seat-monitoring = disabled
+  }
+}
+```
+
+Restart WirePlumber:
+
+```bash
+systemctl --user restart wireplumber
+```
+
+(or simply reboot)
+
+---
+
+## 4. Verify and test
+
+Reconnect if necessary:
+
+```bash
+bluetoothctl
+connect XX:XX:XX:XX:XX:XX
+```
+
+Verify that the headset appears:
+
+```bash
 wpctl status
-pactl list short sinks
 ```
+
+Test audio:
+
+```bash
+pw-play /usr/share/sounds/alsa/Front_Center.wav
+```
+
+**Note:** `pw-play` works directly with PipeWire. `aplay` requires additional ALSA→PipeWire integration.
 
 ------------------------------------------------------------------------
 
