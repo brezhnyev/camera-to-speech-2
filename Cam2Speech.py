@@ -116,10 +116,10 @@ def wait_for_yes_no(timeout=5):
 # reading one large block of text in a single pass would mean waiting for the
 # whole thing to synthesize before any audio starts. Instead, split the text
 # into small word chunks and stream each chunk's raw PCM straight into a
-# single persistent aplay process as soon as it's synthesized - no wav files,
-# and the next chunk gets synthesized while aplay is still playing the
-# previous one (aplay drains from its stdin pipe/buffer concurrently, so
-# this overlap happens for free without any extra threads inside here).
+# single persistent pw-play process as soon as it's synthesized - no wav
+# files, and the next chunk gets synthesized while pw-play is still playing
+# the previous one (pw-play drains from its stdin pipe/buffer concurrently,
+# so this overlap happens for free without any extra threads inside here).
 
 MAX_WORDS_PER_CHUNK = 10
 
@@ -174,13 +174,12 @@ def speak_text_streaming(text):
     if not chunks:
         return
 
-    aplay = subprocess.Popen(
+    player = subprocess.Popen(
         [
-            "aplay", "-q",
-            "-f", "S16_LE",
-            "-r", str(piper_voice.config.sample_rate),
-            "-c", "1",
-            "-t", "raw",
+            "pw-play",
+            "--rate", str(piper_voice.config.sample_rate),
+            "--channels", "1",
+            "--format", "s16",
             "-",
         ],
         stdin=subprocess.PIPE,
@@ -189,15 +188,15 @@ def speak_text_streaming(text):
     try:
         for chunk in chunks:
             for audio_chunk in piper_voice.synthesize(chunk):
-                aplay.stdin.write(audio_chunk.audio_int16_bytes)
+                player.stdin.write(audio_chunk.audio_int16_bytes)
     except (BrokenPipeError, OSError):
-        pass  # aplay was killed (e.g. via stop_reading()) - stop synthesizing
+        pass  # player was killed (e.g. via stop_reading()) - stop synthesizing
     finally:
         try:
-            aplay.stdin.close()
+            player.stdin.close()
         except OSError:
             pass
-        aplay.wait()
+        player.wait()
 
 
 def read_text_file_aloud():
@@ -234,14 +233,14 @@ def speak_menu(menu):
         SettingsMenu.CHANGE_SOUND_LEVEL: "CHANGE_SOUND_LEVEL",
         SettingsMenu.LEAVE: "LEAVE",
     }[menu]
-    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
+    subprocess.run(["pw-play", "sounds/" + text + ".wav"], check=True)
 
 def speak_instruction(instruction):
     text = {
         Instructions.KEEP_CAMERA: "KEEP_CAMERA",
         Instructions.PHOTO_TAKEN: "PHOTO_TAKEN",
     }[instruction]
-    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
+    subprocess.run(["pw-play", "sounds/" + text + ".wav"], check=True)
             
 
 # ----------------------------------------------------------
@@ -463,13 +462,13 @@ def change_sound_level():
     print("Change sound level")
 
 def stop_reading():
-    subprocess.run(["pkill", "aplay"], check=False)
+    subprocess.run(["pkill", "pw-play"], check=False)
 
 # wake_up() plays a short blip of silence before the first real speech, to
 # "wake up" the (usually bluetooth) audio sink from standby - without it, the
 # first syllable of the following phrase (e.g. "Read new text") gets cut off.
-# It used to run `ffmpeg -f lavfi -i anullsrc ... | aplay` to generate that
-# silence on the fly, which meant a shell + ffmpeg + aplay fork on every
+# It used to run `ffmpeg -f lavfi -i anullsrc ... | pw-play` to generate that
+# silence on the fly, which meant a shell + ffmpeg + pw-play fork on every
 # single touch - and ffmpeg's own startup cost (loading its codec/format
 # libs) is slow on a Pi Zero 2. The silence is static, so it's generated once
 # at startup instead, and wake_up() just plays that file directly.
@@ -489,7 +488,7 @@ _generate_wakeup_wav(WAKEUP_WAV_PATH)
 
 
 def wake_up():
-    subprocess.run(["aplay", "-q", WAKEUP_WAV_PATH], check=False)
+    subprocess.run(["pw-play", WAKEUP_WAV_PATH], check=False)
 
 # ----------------------------------------------------------
 # Settings menu
