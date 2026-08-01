@@ -1,5 +1,6 @@
 from email.mime import text
 import queue
+import signal
 from mpu6050 import mpu6050
 from gpiozero import Button
 from piper.voice import PiperVoice
@@ -71,6 +72,16 @@ CLAHE_TILE_SIZE = (8, 8)
 
 # Piper (onnx) text-to-speech model used for reading recognized text blocks.
 PIPER_MODEL_PATH = "en_US-amy-low.onnx"
+
+# -------- reading state, shared between speak_text_streaming() and stop_reading() --------
+# _stop_reading_event lets stop_reading() interrupt an in-progress
+# speak_text_streaming() call (both the piper synthesis loop and the pw-play
+# playback loop poll it and bail out early), and _reading_thread lets
+# stop_reading() block until that interruption has actually taken effect,
+# instead of just firing the stop signal and racing ahead.
+_stop_reading_event = threading.Event()
+_reading_thread = None
+cam = None
 
 # ----------------------------------------------------------
 # Hardware
@@ -166,16 +177,6 @@ def split_into_chunks(text, max_words=20):
         chunks.append(" ".join(words[start:]))
 
     return chunks
-
-
-# -------- reading state, shared between speak_text_streaming() and stop_reading() --------
-# _stop_reading_event lets stop_reading() interrupt an in-progress
-# speak_text_streaming() call (both the piper synthesis loop and the pw-play
-# playback loop poll it and bail out early), and _reading_thread lets
-# stop_reading() block until that interruption has actually taken effect,
-# instead of just firing the stop signal and racing ahead.
-_stop_reading_event = threading.Event()
-_reading_thread = None
 
 
 def speak_text_streaming(text):
@@ -316,6 +317,7 @@ def speak_instruction(instruction):
 def process_new_image():
     # -------- profiling: checkpoints around each stage --------
     t_prev = time.perf_counter()
+    global cam
 
     def checkpoint(label):
         nonlocal t_prev
@@ -349,9 +351,19 @@ def process_new_image():
         )
 
     print("Capture image")
-    threading.Thread(target=speak_instruction, args=(Instructions.KEEP_CAMERA,)).start()
-    subprocess.run(["rm", "-f", "text.txt", "img.png", "gray.png"], check=True)
-    subprocess.run(["rpicam-still", "-t", "2000", "--width", "4608", "--height", "2592", "-o", "img.jpg"], check=True)
+    speak_instruction(Instructions.KEEP_CAMERA)  # not in thread!
+    subprocess.run(["rm", "-f", "text.txt", "img.jpg", "gray.png"], check=True)
+    cam.send_signal(signal.SIGUSR1)
+    # --signal makes rpicam-still perform a single capture then exit - wait for
+    # that exit so the file is guaranteed to be fully written before it's read
+    # below (sending the signal alone doesn't block until the capture and
+    # file write actually finish).
+    while not os.path.exists("img.jpg"):
+        time.sleep(0.1)
+    # process img.jpg
+    cam.terminate()
+    cam = None
+    #subprocess.run(["rpicam-still", "-t", "2000", "--width", "4608", "--height", "2592", "-o", "img.jpg"], check=True)
     threading.Thread(target=speak_instruction, args=(Instructions.PHOTO_TAKEN,)).start()
     checkpoint("capture image")
 
@@ -387,7 +399,7 @@ def process_new_image():
     ok, png = cv2.imencode(".png", img)
     checkpoint("encode png")
     result = subprocess.run(
-        ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "3", "tsv"],
+        ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "6", "tsv"],
         input=png.tobytes(),
         capture_output=True,
     )
@@ -563,7 +575,20 @@ _generate_wakeup_wav(WAKEUP_WAV_PATH)
 
 
 def wake_up():
+    global cam
     subprocess.run(["pw-play", WAKEUP_WAV_PATH], check=False)
+    cam = subprocess.Popen(
+        [
+            "rpicam-still",
+            "--signal",
+            "-t", "999999",
+            "--width", "4608",
+            "--height", "2592",
+            "-o", "img.jpg",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 # ----------------------------------------------------------
 # Settings menu
@@ -624,6 +649,7 @@ def main_loop():
     print("Main loop")
     menu = MainMenu.READ_NEW_TEXT
     wait_for_touch_flag = True
+    global cam
 
     while True:
         # stop any still-playing text-reading before starting new audio
@@ -632,6 +658,9 @@ def main_loop():
         # take as long as the leftover reading has left to play.
 
         if wait_for_touch_flag:
+            if cam is not None:
+                cam.terminate()
+                cam = None
             wait_for_touch()
             wake_up()
             print("Touch detected")
