@@ -214,7 +214,6 @@ def speak_text_streaming(text):
         player = subprocess.Popen(
             [
                 "pw-play",
-                "--raw",
                 "--rate", str(piper_voice.config.sample_rate),
                 "--channels", "1",
                 "--format", "s16",
