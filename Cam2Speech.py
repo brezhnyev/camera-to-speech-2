@@ -18,6 +18,15 @@ import numpy as np
 import subprocess
 import os
 
+from tesserocr import PyTessBaseAPI, RIL
+from PIL import Image
+
+api = PyTessBaseAPI(
+    path="/usr/share/tesseract-ocr/5/tessdata",
+    lang="eng",
+    psm=6,
+)
+
 # os.setpriority(os.PRIO_PROCESS, 0, -10) # this causes interrupts (counter effect)
 
 # reduce image length & width by this factor before running OCR (speeds
@@ -59,7 +68,7 @@ MAX_SKEW = 20
 # deskew_angle only needs to find line directions, not read text, so it can
 # run on an even smaller image than the one used for OCR - faster, and the
 # detected angle is scale-independent so it still applies directly to img.
-DESKEW_FACTOR = 2
+DESKEW_FACTOR = 4
 
 # -------- contrast enhancement (CLAHE) before OCR --------
 # photographed pages usually have uneven lighting (shadows, flash falloff
@@ -134,23 +143,10 @@ def wait_for_yes_no(timeout=5):
 # so this overlap happens for free without any extra threads inside here).
 
 # trailing punctuation that marks a natural pause in speech
-BREAK_PUNCT_RE = re.compile(r"[.,:;!?…\-–—()\[\]\"'“”‘’]$")
+BREAK_PUNCT_RE = re.compile(r"[.!?…]$")
 
 # short conjunctions/connectors that also tend to introduce a brief pause
 BREAK_WORDS = {
-    "and", "but", "or", "so", "yet", "nor",
-    "because", "however", "though", "although",
-    "while", "since", "then", "when", "where",
-    "whereas", "wherever", "whenever", "whether",
-    "after", "before", "once",
-    "what", "which", "who", "whom", "whose",
-    "if", "unless", "until",
-    "also", "therefore", "thus", "hence",
-    "meanwhile", "otherwise", "instead",
-    "besides", "moreover", "furthermore",
-    "nevertheless", "nonetheless",
-    "indeed", "still", "rather",
-    "despite", "through", "throughout", "via", "to"
 }
 
 
@@ -398,22 +394,36 @@ def process_new_image():
     # itself, so there's no need for MSER, dilation, or a separate OCR filter step.
     ok, png = cv2.imencode(".png", img)
     checkpoint("encode png")
-    result = subprocess.run(
-        ["tesseract", "stdin", "stdout", "-l", "eng", "--psm", "6", "tsv"],
-        input=png.tobytes(),
-        capture_output=True,
+    api.SetImageBytes(
+        img.tobytes(),
+        img.shape[1],
+        img.shape[0],
+        1,
+        img.shape[1]
     )
+    api.Recognize()
     checkpoint("tesseract OCR")
 
-    reader = csv.DictReader(
-        io.StringIO(result.stdout.decode("utf-8", errors="ignore")), delimiter="\t"
-    )
+    words_all = []
 
-    # collect all recognized words directly (level 5), ignoring Tesseract's own
-    # block_num/par_num grouping entirely - see LINE_MERGE_FACTOR comment above.
-    words_all = [
-        row for row in reader if int(row["level"]) == 5 and row["text"].strip()
-    ]
+    ri = api.GetIterator()
+    if ri:
+        level = RIL.WORD
+        while True:
+            text = ri.GetUTF8Text(level) or ""
+            if text.strip():
+                x1, y1, x2, y2 = ri.BoundingBox(level)
+                words_all.append({
+                    "text": text,
+                    "left": x1,
+                    "top": y1,
+                    "width": x2 - x1,
+                    "height": y2 - y1,
+                    "conf": ri.Confidence(level),
+                })
+
+            if not ri.Next(level):
+                break
     checkpoint("parse tsv")
 
     # -------- group words into blocks via dilation + connected components --------
@@ -513,7 +523,7 @@ def process_new_image():
 
     with open("text.txt", "w") as f:
         for i, (x, y, w, h, text) in enumerate(blocks, start=1):
-            f.write(f"TEXT BLOCK {i}.\n\n")
+            f.write(f"TEXT BLOCK {i}...\n\n")
             f.write(text)
             f.write("...\n\n")
 
@@ -702,4 +712,14 @@ def main_loop():
 
 
 if __name__ == "__main__":
-    main_loop()
+    try:
+        main_loop()
+    except KeyboardInterrupt:
+        print("Exiting program")
+
+        if cam is not None:
+            cam.terminate()
+            cam.wait()
+
+        if api is not None:
+            api.End()
