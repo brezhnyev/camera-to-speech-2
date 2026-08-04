@@ -143,7 +143,7 @@ def wait_for_yes_no(timeout=5):
 # so this overlap happens for free without any extra threads inside here).
 
 # trailing punctuation that marks a natural pause in speech
-BREAK_PUNCT_RE = re.compile(r"[.!?…]$")
+BREAK_PUNCT_RE = re.compile(r"[.,!?…]$")
 
 # short conjunctions/connectors that also tend to introduce a brief pause
 BREAK_WORDS = {
@@ -718,8 +718,7 @@ if __name__ == "__main__":
         print("Exiting program")
 
         if cam is not None:
-            cam.terminate()
-            cam.wait()
+            subprocess.run(["pkill", "rpicam-still"], check=False)
 
         if api is not None:
             api.End()
