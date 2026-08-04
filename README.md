@@ -50,7 +50,7 @@ The two sensors provide the interactivity (interface) with the user: device init
 
 Touch sensor:<br>
 
-Touch Sensor video demo: [Download link](./images/touch-sensor.mp4)
+[Touch Sensor video demo](./images/touch-sensor.gif)
 
 ---
 
