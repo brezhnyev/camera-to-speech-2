@@ -50,7 +50,7 @@ The two sensors provide the interactivity (interface) with the user: device init
 
 Touch sensor:<br>
 
-[Touch Sensor video demo](./images/touch-sensor.gif)
+![Touch Sensor video demo](./images/touch-sensor.gif)
 
 ---
 
@@ -308,3 +308,7 @@ Intensive use of algos (tesseract) may reduce the time significantly (expedted ~
 ![](./images/20260727_170422.jpg)
 ![](./images/20260727_170445.jpg)
 ![](./images/20260727_170454.jpg)
+![](./images/20260804_110119.jpg)
+![](./images/20260804_110623.jpg)
+![](./images/20260804_110631.jpg)
+![](./images/20260804_110717.jpg)
