@@ -119,7 +119,8 @@ def read_text_file_aloud():
         text = ""
 
     if not text.strip():
-        text = "Could not generate text."
+        speak_instruction(Instructions.TEXT_NOT_FOUND)
+        return
 
     subprocess.run(
         'RHVoice-test -p alan -o - | aplay',
@@ -254,10 +255,6 @@ def process_new_image():
         1,
         img.shape[1]
     )
-    ri = api.GetIterator()
-    if ri is None:
-        speak_instruction(Instructions.TEXT_NOT_FOUND)  # not in thread!
-        return
     api.Recognize()
     checkpoint("tesseract OCR")
 

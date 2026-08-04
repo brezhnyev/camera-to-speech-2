@@ -26,10 +26,8 @@ Reference commercial product:
 
 ### Camera
 
-* MIPI CSI Omnivision 5647 CMOS Bildsensor
-* Resolution: 2592x1944
-* https://www.amazon.de/dp/B01M6UCEM5?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1
-The quality of the camera proved to be not good enough for text recognition. Expected upgrade to Raspberry Pi Camera Module 3.
+* MIPI CSI Raspberry Pi Camera Module 3, Kameramodul 3 12MP
+* Resolution: 4608 × 2592 Pixel
 
 ### Audio Output
 
@@ -37,7 +35,8 @@ The quality of the camera proved to be not good enough for text recognition. Exp
 
 ### Power
 
-* Waveshare UPS HAT C für Raspberry Pi Zero, I2C Batterieüberwachung, Li-po
+* Waveshare UPS HAT C für Raspberry Pi Zero, I2C Batterieüberwachung, Li-po, 1000 mAh
+* roughly estimated duration 4-8 hours (depending on the load)
 * https://www.ebay.de/itm/127800499172
 
 ### Sensors
