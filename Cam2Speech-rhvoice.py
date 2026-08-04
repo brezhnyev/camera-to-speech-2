@@ -152,6 +152,7 @@ def speak_instruction(instruction):
     text = {
         Instructions.KEEP_CAMERA: "KEEP_CAMERA",
         Instructions.PHOTO_TAKEN: "PHOTO_TAKEN",
+        Instructions.TEXT_NOT_FOUND: "TEXT_NOT_FOUND",
     }[instruction]
     subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
             
@@ -253,6 +254,10 @@ def process_new_image():
         1,
         img.shape[1]
     )
+    ri = api.GetIterator()
+    if ri is None:
+        speak_instruction(Instructions.TEXT_NOT_FOUND)  # not in thread!
+        return
     api.Recognize()
     checkpoint("tesseract OCR")
 
@@ -492,6 +497,7 @@ def settings_loop():
 class Instructions(Enum):
     KEEP_CAMERA = 0
     PHOTO_TAKEN = 1
+    TEXT_NOT_FOUND = 2
 
 # ----------------------------------------------------------
 # Main menu

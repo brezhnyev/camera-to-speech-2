@@ -45,6 +45,14 @@ The quality of the camera proved to be not good enough for text recognition. Exp
 * Axel+Gyro MPU6050
 * Touch sensor
 
+The two sensors provide the interactivity (interface) with the user: device initialization (waking up) is activated by a touch sensor. Nod is agreeing with menu option, shake is disagreeing - which moves to the next menu option:
+<br>
+![](./images/interface.jpg)
+
+Touch sensor:<br>
+
+<video src="./images/touch-sensor.mp4" controls width="400"></video>
+
 ---
 
 [Raspberry Pi Setup](Raspberry_Pi_Setup.md)
@@ -289,12 +297,14 @@ gpiomon --num-events=1 --edges=rising -c gpiochip0 17 22 27
 ### Example of a taken photo (RGB)
 ![RGB image](./images/img.jpg)
 
-### Image converted to gray, cropped, contrast enhanced, horizon correction):
+### Image converted to gray, cropped, contrast enhanced, horizon correction, tesseract detected text regions):
 ![Gray image](./images/gray.jpg)
+<br>
+![Gray image](./images/words-internet-page.png)
 
 ### Overall size and weight
-Weight about 75 grams - still pretty heavy to wear on the side of the glass
-Overall size: 80 x 35 x 20 mm
+Weight about 70 grams - still pretty heavy to wear on the side of the glass
+Overall size: 80 x 35 x 17 mm (not counting screws heads)
 
 ### Battery duration
 In idle mode (only raspi OS is running) the capacity reduces by ~10% within one hour making expected idle work 10 hours.
@@ -302,14 +312,11 @@ Intensive use of algos (tesseract) may reduce the time significantly (expedted ~
 
 ### Pictures of the device
 
-![](./images/20260723_105400.jpg)
-![](./images/20260723_105429.jpg)
-![](./images/20260723_112720.jpg)
-![](./images/20260723_112740.jpg)
-![](./images/20260724_115743.jpg)
-![](./images/20260724_115818.jpg)
-![](./images/20260724_115838.jpg)
-![](./images/20260724_115919.jpg)
-![](./images/20260724_115951.jpg)
-![](./images/20260724_120003.jpg)
-![](./images/20260724_121534.jpg)
+![](./images/20260727_170054.jpg)
+![](./images/20260727_170109.jpg)
+![](./images/20260727_170323.jpg)
+![](./images/20260727_170359.jpg)
+![](./images/20260727_170410.jpg)
+![](./images/20260727_170422.jpg)
+![](./images/20260727_170445.jpg)
+![](./images/20260727_170454.jpg)
