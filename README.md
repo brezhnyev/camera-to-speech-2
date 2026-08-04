@@ -50,7 +50,7 @@ The two sensors provide the interactivity (interface) with the user: device init
 
 Touch sensor:<br>
 
-Touch Sensor: [Download link](./images/touch-sensor.mp4)
+Touch Sensor video demo: [Download link](./images/touch-sensor.mp4)
 
 ---
 
@@ -275,11 +275,11 @@ gpiomon --num-events=1 --edges=rising -c gpiochip0 17 22 27
 ### Image converted to gray, cropped, contrast enhanced, horizon correction, tesseract detected text regions):
 ![Gray image](./images/gray.jpg)
 
-* RHVoice: <br>
+* RHVoice wav demo: <br>
 
 [Download link](./sounds/rhvoice-example.wav)
 
-* Piper: <br>
+* Piper wav demo: <br>
 
 [Download link](./sounds/piper-example.wav)
 
