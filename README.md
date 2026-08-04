@@ -101,7 +101,7 @@ ffmpeg
     ->
 tesseract
     ->
-RHVoice
+RHVoice / piper
     ->
 aplay
 ```
@@ -298,11 +298,23 @@ gpiomon --num-events=1 --edges=rising -c gpiochip0 17 22 27
 
 ### Image converted to gray, cropped, contrast enhanced, horizon correction, tesseract detected text regions):
 ![Gray image](./images/gray.jpg)
+
+* RHVoice: <br>
+
+<audio controls src="./sounds/rhvoice-example.wav"></audio>
+
+* Piper: <br>
+
+<audio controls src="./sounds/piper-example.wav"></audio>
+
+**For raspberry pi 2 piper is reaching the HW limits and causes large delays.**
+
 <br>
-![Gray image](./images/words-internet-page.png)
+
+![Internet page](./images/words-internet-page.png)
 
 ### Overall size and weight
-Weight about 70 grams - still pretty heavy to wear on the side of the glass
+Weight about 70 grams
 Overall size: 80 x 35 x 17 mm (not counting screws heads)
 
 ### Battery duration

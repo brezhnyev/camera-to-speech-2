@@ -403,9 +403,6 @@ def process_new_image():
         img.shape[1]
     )
     api.Recognize()
-    if ri is None:
-        speak_instruction(Instructions.TEXT_NOT_FOUND)  # not in thread!
-        return
     checkpoint("tesseract OCR")
 
     words_all = []
