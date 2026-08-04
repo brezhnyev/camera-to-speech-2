@@ -50,7 +50,7 @@ The two sensors provide the interactivity (interface) with the user: device init
 
 Touch sensor:<br>
 
-Touch Sensor: [▶ Watch](./images/20260727_134432.mp4)
+Touch Sensor: [▶ Watch](./images/touch-sensor.mp4)
 
 ---
 
