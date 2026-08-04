@@ -98,7 +98,6 @@ cam = None
 
 touch = Button(22, pull_up=False)
 mpu = mpu6050(0x68)
-piper_voice = PiperVoice.load(PIPER_MODEL_PATH)
 
 # PiperVoice.load() already builds the onnxruntime session eagerly, but the
 # *first* synthesize() call still pays extra one-time costs on top of that:
@@ -106,6 +105,7 @@ piper_voice = PiperVoice.load(PIPER_MODEL_PATH)
 # kernel selection) and espeak-ng's lazy phonemizer data init. Both are much
 # slower than every call after. Pay that cost now, during startup, instead of
 # during the user's first button press.
+piper_voice = PiperVoice.load(PIPER_MODEL_PATH)
 print("Warming up TTS model...")
 for _ in piper_voice.synthesize("Warming up."):
     pass
