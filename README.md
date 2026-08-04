@@ -46,11 +46,11 @@ Reference commercial product:
 
 The two sensors provide the interactivity (interface) with the user: device initialization (waking up) is activated by a touch sensor. Nod is agreeing with menu option, shake is disagreeing - which moves to the next menu option:
 <br>
-![](./images/interface.jpg)
+![Interface](./images/interface.jpg)
 
 Touch sensor:<br>
 
-<video src="./images/touch-sensor.mp4" controls width="400"></video>
+Touch Sensor: [▶ Watch](./images/20260727_134432.mp4)
 
 ---
 
@@ -63,30 +63,6 @@ Touch sensor:<br>
 ### Operating System
 
 * Raspberry Pi OS Lite 64 bit
-
-### Installed Packages
-
-```bash
-pi@raspberrypi:~ $ history | grep install
-    3  sudo apt install i2c-tools
-    6  sudo apt install libcamera-apps
-   14  sudo apt install pipewire wireplumber pipewire-audio
-   20  sudo apt install i2c-tools
-   22  sudo apt install git
-   71  sudo apt install python3-pip
-   72  sudo apt install python3-smbus
-   74  pip3 install mpu6050-raspberrypi
-   77  pip3 install mpu6050-raspberrypi --break-system-packages
-  128  sudo apt install imagemagick
-       sudo apt install tesseract-ocr
-       sudo apt install tesseract-ocr-eng
-       sudo apt install tesseract-ocr-rus
-       sudo apt install rhvoice
-       sudo apt install rhvoice-russian
-       sudo apt install rhvoice-english   
-       sudo apt install sysstat    
-
-```
 
 ---
 
@@ -301,11 +277,12 @@ gpiomon --num-events=1 --edges=rising -c gpiochip0 17 22 27
 
 * RHVoice: <br>
 
-<audio controls src="./sounds/rhvoice-example.wav"></audio>
+[▶ Listen](./sounds/rhvoice-example.wav)
 
 * Piper: <br>
 
-<audio controls src="./sounds/piper-example.wav"></audio>
+[▶ Listen](./sounds/piper-example.wav)
+
 
 **For raspberry pi 2 piper is reaching the HW limits and causes large delays.**
 

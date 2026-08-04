@@ -28,16 +28,24 @@ rpicam-still -o test.jpg
 ## 3. APT packages
 
 ``` bash
-sudo apt update && sudo apt install git python3-pip python3-smbus i2c-tools sysstat tesseract-ocr libgl1 pipewire wireplumber pipewire-audio pipewire-pulse libspa-0.2-bluetooth bluez
+sudo apt update && sudo apt install git python3-pip python3-smbus i2c-tools sysstat tesseract-ocr libgl1 pipewire wireplumber pipewire-audio pipewire-pulse libspa-0.2-bluetooth bluez libcamera-apps
+```
+
+### Other useful Packages
+
+```bash
+    sudo apt install rhvoice
+    sudo apt install rhvoice-russian
+    sudo apt install rhvoice-english   
+    sudo apt install sysstat    
+
 ```
 
 ------------------------------------------------------------------------
 
-## 4. Bluetooth audio setup
+## Bluetooth Audio Setup (PipeWire)
 
-# Bluetooth Audio Setup (PipeWire)
-
-## 1. Pair the headset (no reboot)
+### 1. Pair the headset (no reboot)
 
 Check that Bluetooth is not blocked:
 
@@ -69,7 +77,7 @@ continue with the PipeWire setup.
 
 ---
 
-## 2. Install PipeWire (logout/login or reboot recommended)
+### 2. Install PipeWire (logout/login or reboot recommended)
 
 Bluetooth audio (A2DP) **requires PipeWire**. ALSA (`aplay`) alone cannot play to a Bluetooth headset.
 
@@ -79,7 +87,7 @@ sudo apt install -y pipewire wireplumber pipewire-pulse libspa-0.2-bluetooth pul
 
 ---
 
-## 3. Headless Raspberry Pi fix (restart WirePlumber or reboot)
+### 3. Headless Raspberry Pi fix (restart WirePlumber or reboot)
 
 Create the configuration directory:
 
@@ -113,7 +121,7 @@ systemctl --user restart wireplumber
 
 ---
 
-## 4. Verify and test
+### 4. Verify and test
 
 Reconnect if necessary:
 
@@ -156,8 +164,7 @@ modules (e.g. `python3-smbus`).
 ``` text
 mpu6050-raspberrypi
 opencv-python==4.10.0.84
-numpy==1.26.4
-tesserocr
+tesserocr<2.10
 piper-tts
 ```
 
