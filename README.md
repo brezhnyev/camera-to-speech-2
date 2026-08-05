@@ -275,9 +275,15 @@ gpiomon --num-events=1 --edges=rising -c gpiochip0 17 22 27
 ![Gray image](./images/gray.jpg)
 
 * RHVoice wav demo: <br>
+```
+echo "Alice thought she might as well go back, and see how the game was going on, as she heard the Queen’s voice in the distance, screaming with passion. She had already heard her sentence three of the players to be executed for having missed their turns, and she did not like the look of things at all, as the game was in such confusion that she never knew whether it was her turn or not. So she went in search of her hedgehog." | RHVoice-test -p alan -o - | ffmpeg -f wav -i pipe:0 -af "volume=10dB" sounds/rhvoice-example.wav
+```
 <audio controls src="sounds/rhvoice-example.wav"></audio>
 
 * Piper wav demo: <br>
+```
+echo "Alice thought she might as well go back, and see how the game was going on, as she heard the Queen’s voice in the distance, screaming with passion. She had already heard her sentence three of the players to be executed for having missed their turns, and she did not like the look of things at all, as the game was in such confusion that she never knew whether it was her turn or not. So she went in search of her hedgehog." | piper --model en_US-amy-low.onnx --output_file piper-example.wav
+```
 <audio controls src="sounds/piper-example.wav"></audio>
 
 **For raspberry pi Zero 2 piper is reaching the HW limits and causes large delays.**
