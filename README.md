@@ -49,8 +49,7 @@ The two sensors provide the interactivity (interface) with the user: device init
 ![Interface](./images/interface.jpg)
 
 Touch sensor:<br>
-
-[▶ Touch sensor demo](./media.html)
+<video controls width="600" src="images/touch-sensor.mp4"></video>
 
 ---
 
@@ -276,12 +275,12 @@ gpiomon --num-events=1 --edges=rising -c gpiochip0 17 22 27
 ![Gray image](./images/gray.jpg)
 
 * RHVoice wav demo: <br>
-[▶ RHVoice audio demo](./media.html)
+<audio controls src="sounds/rhvoice-example.wav"></audio>
 
 * Piper wav demo: <br>
-[▶ Piper audio demo](./media.html)
+<audio controls src="sounds/piper-example.wav"></audio>
 
-**For raspberry pi 2 piper is reaching the HW limits and causes large delays.**
+**For raspberry pi Zero 2 piper is reaching the HW limits and causes large delays.**
 
 <br>
 
