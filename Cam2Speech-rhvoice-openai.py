@@ -18,6 +18,14 @@ import subprocess
 import os
 import base64
 import json
+import sys
+import shutil # for copying
+
+sys.path.insert(0, "/home/pi/camera-to-speech-2/blaze_app_python")
+sys.path.insert(0, "/home/pi/camera-to-speech-2/blaze_app_python/blaze_common")
+
+from blaze_tflite.blazedetector import BlazeDetector
+from blaze_tflite.blazelandmark import BlazeLandmark
 
 from tesserocr import PyTessBaseAPI, RIL
 from PIL import Image
@@ -37,6 +45,26 @@ api = PyTessBaseAPI(
 # to change with FACTOR: word counts and confidence percentages are both
 # resolution-independent.
 FACTOR = 2
+
+# raspi camera capture resolution - must match wake_up()'s rpicam-still --width/--height
+WIDTH = 4608
+HEIGHT = 2592
+
+# columns cropped off the left of img.jpg before OCR/finger-detection - must
+# match the [:, CROP_LEFT:] crop in process_new_image_tesseract()
+CROP_LEFT = WIDTH // 2
+
+# rpicam-still always writes captures to this fixed path (see wake_up())
+CAM_IMG = "img.jpg"
+
+
+def transform_to_ocr_space(x, y, orig_height):
+    # mirrors the crop + 90deg-clockwise rotation from process_new_image_tesseract()'s
+    # img pipeline (the FACTOR downscale is applied separately, at read time)
+    cropped_x = x - CROP_LEFT
+    rotated_x = orig_height - 1 - y
+    rotated_y = cropped_x
+    return rotated_x, rotated_y
 
 # a paragraph must have at least this many recognized words, with at least
 # this mean confidence, to be treated as a real text block (vs. photo/logo
@@ -115,8 +143,12 @@ def wait_for_yes_no(timeout=5):
 
 
 def read_text_file_aloud():
+    # a finger was pointing at a specific block when the photo was taken -
+    # read just that block instead of the whole page
+    path = "finger.txt" if os.path.exists("finger.txt") else "text.txt"
+
     try:
-        with open("text.txt") as f:
+        with open(path) as f:
             text = f.read()
     except FileNotFoundError:
         text = ""
@@ -157,6 +189,7 @@ def speak_instruction(instruction):
         Instructions.KEEP_CAMERA: "KEEP_CAMERA",
         Instructions.PHOTO_TAKEN: "PHOTO_TAKEN",
         Instructions.TEXT_NOT_FOUND: "TEXT_NOT_FOUND",
+        Instructions.POINT_BLOCK: "POINT_BLOCK",
     }[instruction]
     subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
             
@@ -172,40 +205,54 @@ def checkpoint(label, t_prev):
 
 # main loop actions
 
-def take_photo():
+def cleanup_photo_files():
+    # run once per touch, before any captures - NOT inside take_photo(),
+    # since a session now takes two photos and the second one must not wipe
+    # out the first photo/text.txt while they're still being processed
+    subprocess.run(
+        ["rm", "-f", "text.txt", CAM_IMG, "img-finger.jpg", "gray.png", "finger.txt", "finger-pos.txt"],
+        check=True,
+    )
+
+
+def take_photo(name):
     # -------- profiling: checkpoints around each stage --------
     t_prev = time.perf_counter()
     global cam
     if cam is None:
         return
 
-    print("Capture image")
-    speak_instruction(Instructions.KEEP_CAMERA)  # not in thread!
-    subprocess.run(["rm", "-f", "text.txt", "img.jpg", "gray.png"], check=True)
+    print("Capture image:", name)
+    if name == "img-no-finger.jpg":
+        speak_instruction(Instructions.KEEP_CAMERA)  # not in thread!
     cam.send_signal(signal.SIGUSR1)
     # --signal makes rpicam-still perform a single capture then exit - wait for
     # that exit so the file is guaranteed to be fully written before it's read
     # below (sending the signal alone doesn't block until the capture and
     # file write actually finish).
-    while not os.path.exists("img.jpg"):
+    while not os.path.exists(CAM_IMG): # TODO: not reliable!
         time.sleep(0.1)
-    # process img.jpg
-    cam.terminate()
-    cam = None
-    #subprocess.run(["rpicam-still", "-t", "2000", "--width", "4608", "--height", "2592", "-o", "img.jpg"], check=True)
+    # cam always writes to CAM_IMG - rename to the requested name so the
+    # two captures per session don't overwrite each other
+    shutil.copy2(CAM_IMG, name)
+    if (name == "img-finger.jpg"): # TODO: nicer way to do this
+        cam.terminate()
+        cam = None
     threading.Thread(target=speak_instruction, args=(Instructions.PHOTO_TAKEN,)).start()
     t_prev = checkpoint("capture image", t_prev)
 
 
 def process_new_image_openai():
 
-    take_photo()
+    cleanup_photo_files()
+    take_photo(CAM_IMG)
+    threading.Thread(target=find_finger_tip).start()
 
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
     img = cv2.resize(
         cv2.rotate(
-            cv2.cvtColor(cv2.imread("img.jpg")[:, 2304:], cv2.COLOR_BGR2GRAY),
+            cv2.cvtColor(cv2.imread(CAM_IMG)[:, CROP_LEFT:]),
             cv2.ROTATE_90_CLOCKWISE,
         ),
         None,
@@ -269,7 +316,10 @@ def process_new_image_openai():
 
 def process_new_image_tesseract():
 
-    take_photo()
+    cleanup_photo_files()
+    IMAGE = "img-no-finger.jpg"
+    take_photo(IMAGE)
+    threading.Thread(target=find_finger_tip).start()
 
     def deskew_angle(gray_img):
         edges = cv2.Canny(gray_img, 50, 150, apertureSize=3)
@@ -300,7 +350,7 @@ def process_new_image_tesseract():
 
     img = cv2.resize(
         cv2.rotate(
-            cv2.cvtColor(cv2.imread("img.jpg")[:, 2304:], cv2.COLOR_BGR2GRAY),
+            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:], cv2.COLOR_BGR2GRAY),
             cv2.ROTATE_90_CLOCKWISE,
         ),
         None,
@@ -396,8 +446,94 @@ def process_new_image_tesseract():
     cv2.imwrite("words.png", out)
     t_prev = checkpoint("write text.txt + words.png", t_prev)
 
+    # if a fingertip was detected while taking the photo, find the block
+    # it's closest to (in the same crop/rotate/downscale space as img) and
+    # read just that block instead of the whole page
+    if os.path.exists("finger-pos.txt") and blocks:
+        with open("finger-pos.txt") as f:
+            xt, yt = map(float, f.read().strip().split(","))
+        xt /= FACTOR
+        yt /= FACTOR
+
+        def block_dist(b):
+            cx = b["left"] + b["width"] / 2
+            cy = b["top"] + b["height"] / 2
+            return math.hypot(cx - xt, cy - yt)
+
+        closest = min(blocks, key=block_dist)
+        with open("finger.txt", "w") as f:
+            f.write(closest["text"])
+    t_prev = checkpoint("finger-pointing lookup", t_prev)
+
     read_text_file_aloud()
     t_prev = checkpoint("tts (rhvoice, backgrounded)", t_prev)
+
+
+def find_finger_tip():
+
+    subprocess.run(["rm", "-f", CAM_IMG], check=True)
+    time.sleep(2)
+    IMAGE = "img-finger.jpg"
+    take_photo(IMAGE)
+
+    detector = BlazeDetector("blazepalm")
+    detector.load_model("/home/pi/camera-to-speech-2/blaze_app_python/blaze_tflite/models/palm_detection_lite.tflite")
+
+    landmark = BlazeLandmark("blazehandlandmark")
+    landmark.load_model("/home/pi/camera-to-speech-2/blaze_app_python/blaze_tflite/models/hand_landmark_lite.tflite")
+
+    img = cv2.imread(IMAGE)
+    orig_height = img.shape[0]
+
+    # downscale like the tesseract OCR pipeline, for faster hand detection
+    img = cv2.resize(
+        cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+        None, fx=1/FACTOR, fy=1/FACTOR, interpolation=cv2.INTER_AREA
+    )
+
+    t = time.time()
+
+    img1, scale1, pad1 = detector.resize_pad(img)
+    nd = detector.predict_on_image(img1)
+
+    print("Hands:", len(nd))
+
+    if len(nd):
+        detections = detector.denormalize_detections(nd, scale1, pad1)
+
+        xc, yc, scale, theta = detector.detection2roi(detections)
+
+        roi_img, roi_affine, roi_box = landmark.extract_roi(
+            img, xc, yc, theta, scale
+        )
+
+        result = landmark.predict(roi_img)
+
+        if len(result) == 3:
+            flags, landmarks, handedness = result
+        else:
+            flags, landmarks = result
+
+        print("Landmarks shape:", landmarks.shape)
+        print("Flags:", flags)
+
+        landmarks = landmark.denormalize_landmarks(landmarks, roi_affine)
+
+        # landmark 8 = index fingertip, in the FACTOR-downscaled image's
+        # coordinate space - scale it back up to raw pixel coordinates
+        # before the crop/rotate transform below
+        tip = landmarks[0, 8] * FACTOR
+
+        print("Index fingertip:", int(tip[0]), int(tip[1]))
+
+        # map (x, y) - found on the raw img-finger.jpg - into the coordinate
+        # space of the cropped + rotated + downscaled image
+        # process_new_image_tesseract() runs OCR on, so it lines up with the
+        # reported text block boxes
+        tx, ty = transform_to_ocr_space(tip[0], tip[1], orig_height)
+
+        with open("finger-pos.txt", "w") as f:
+            f.write(f"{tx},{ty}\n")
 
 
 def repeat_last_text():
@@ -452,9 +588,9 @@ def wake_up():
             "rpicam-still",
             "--signal",
             "-t", "999999",
-            "--width", "4608",
-            "--height", "2592",
-            "-o", "img.jpg",
+            "--width", str(WIDTH),
+            "--height", str(HEIGHT),
+            "-o", CAM_IMG,
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -505,6 +641,7 @@ class Instructions(Enum):
     KEEP_CAMERA = 0
     PHOTO_TAKEN = 1
     TEXT_NOT_FOUND = 2
+    POINT_BLOCK = 3
 
 # ----------------------------------------------------------
 # Main menu
