@@ -1,4 +1,4 @@
-from email.mime import text
+from email.mime import image, text
 import queue
 import signal
 from mpu6050 import mpu6050
@@ -19,7 +19,6 @@ import os
 import base64
 import json
 import sys
-import shutil # for copying
 
 sys.path.insert(0, "/home/pi/camera-to-speech-2/blaze_app_python")
 sys.path.insert(0, "/home/pi/camera-to-speech-2/blaze_app_python/blaze_common")
@@ -56,15 +55,6 @@ CROP_LEFT = WIDTH // 2
 
 # rpicam-still always writes captures to this fixed path (see wake_up())
 CAM_IMG = "img.jpg"
-
-
-def transform_to_ocr_space(x, y, orig_height):
-    # mirrors the crop + 90deg-clockwise rotation from process_new_image_tesseract()'s
-    # img pipeline (the FACTOR downscale is applied separately, at read time)
-    cropped_x = x - CROP_LEFT
-    rotated_x = orig_height - 1 - y
-    rotated_y = cropped_x
-    return rotated_x, rotated_y
 
 # a paragraph must have at least this many recognized words, with at least
 # this mean confidence, to be treated as a real text block (vs. photo/logo
@@ -111,6 +101,8 @@ CLAHE_TILE_SIZE = (8, 8)
 
 cam = None
 
+SYSTEM_LANGUAGE = "English"
+
 # ----------------------------------------------------------
 # Hardware
 # ----------------------------------------------------------
@@ -143,15 +135,43 @@ def wait_for_yes_no(timeout=5):
 
 
 def read_text_file_aloud():
-    # a finger was pointing at a specific block when the photo was taken -
-    # read just that block instead of the whole page
-    path = "finger.txt" if os.path.exists("finger.txt") else "text.txt"
 
     try:
-        with open(path) as f:
-            text = f.read()
-    except FileNotFoundError:
-        text = ""
+        with open("text.json", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        speak_instruction(Instructions.TEXT_NOT_FOUND)
+        return
+
+    objects = data.get("objects", [])
+
+    # Finger exists -> read closest object
+    if os.path.exists("finger-pos.txt") and objects:
+
+        with open("finger-pos.txt") as f:
+            x, y = map(float, f.read().strip().split(","))
+
+        def distance(b):
+            cx = b["x"] + b["w"] / 2
+            cy = b["y"] + b["h"] / 2
+            return (cx - x) ** 2 + (cy - y) ** 2
+
+        obj = min(objects, key=distance)
+        text = obj["translation"] or obj["text"]
+
+    # No finger -> scene + all objects
+    else:
+        texts = []
+
+        if data.get("scene"):
+            texts.append(data["scene"])
+
+        for obj in objects:
+            text = obj["translation"] or obj["text"]
+            if text:
+                texts.append(text)
+
+        text = "\n".join(texts)
 
     if not text.strip():
         speak_instruction(Instructions.TEXT_NOT_FOUND)
@@ -161,7 +181,8 @@ def read_text_file_aloud():
         'RHVoice-test -p alan -o - | aplay',
         input=text,
         text=True,
-        shell=True)
+        shell=True
+    )
 
 
 def next_main_menu(menu):
@@ -175,6 +196,7 @@ def next_settings_menu(menu):
 def speak_menu(menu):
     text = {
         MainMenu.READ_NEW_TEXT: "READ_NEW_TEXT",
+        MainMenu.ASK_AGAIN: "ASK_AGAIN",
         MainMenu.REPEAT_LAST_TEXT: "REPEAT_LAST_TEXT",
         MainMenu.SETTINGS: "SETTINGS",
         MainMenu.LEAVE: "LEAVE",
@@ -210,10 +232,9 @@ def cleanup_photo_files():
     # since a session now takes two photos and the second one must not wipe
     # out the first photo/text.txt while they're still being processed
     subprocess.run(
-        ["rm", "-f", "text.txt", CAM_IMG, "img-finger.jpg", "gray.png", "finger.txt", "finger-pos.txt"],
+        ["rm", "-f", "text.json", CAM_IMG, "img-finger.jpg", "finger-pos.txt"],
         check=True,
     )
-
 
 def take_photo(name):
     # -------- profiling: checkpoints around each stage --------
@@ -234,25 +255,27 @@ def take_photo(name):
         time.sleep(0.1)
     # cam always writes to CAM_IMG - rename to the requested name so the
     # two captures per session don't overwrite each other
-    shutil.copy2(CAM_IMG, name)
+    subprocess.run(["aplay", "sounds/camera_shutter.wav"], check=True) # TODO: still potential for parallel execution
+    os.replace(CAM_IMG, name)
     if (name == "img-finger.jpg"): # TODO: nicer way to do this
         cam.terminate()
         cam = None
-    threading.Thread(target=speak_instruction, args=(Instructions.PHOTO_TAKEN,)).start()
     t_prev = checkpoint("capture image", t_prev)
 
 
 def process_new_image_openai():
 
     cleanup_photo_files()
-    take_photo(CAM_IMG)
-    threading.Thread(target=find_finger_tip).start()
+    IMAGE = "img-no-finger.jpg"
+    take_photo(IMAGE)
+    finger_thread = threading.Thread(target=find_finger_tip)
+    finger_thread.start()
 
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
     img = cv2.resize(
         cv2.rotate(
-            cv2.cvtColor(cv2.imread(CAM_IMG)[:, CROP_LEFT:]),
+            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:], cv2.COLOR_BGR2RGB),
             cv2.ROTATE_90_CLOCKWISE,
         ),
         None,
@@ -271,7 +294,37 @@ def process_new_image_openai():
             "content": [
                 {
                     "type": "input_text",
-                    "text": "Extract readable text on the image."
+                    "text": f"""
+                    Analyze the image for a blind user.
+
+                    System language: {SYSTEM_LANGUAGE}
+
+                    Return only valid JSON matching exactly this structure:
+
+                    {{
+                    "scene": "short description of the whole scene",
+                    "objects": [
+                        {{
+                        "x": 0,
+                        "y": 0,
+                        "w": 0,
+                        "h": 0,
+                        "text": null,
+                        "translation": null
+                        }}
+                    ]
+                    }}
+
+                    Rules:
+                    - Return at most 10 important logical objects.
+                    - x,y,w,h are pixel coordinates in the supplied image.
+                    - x,y are the top-left corner of the bounding box.
+                    - For non-text objects, place a brief description in the "text" field in the system language.
+                    - For detected text blocks, put the exact readable original text in the "text" field.
+                    - For detected text blocks whose language differs from the system language, put its translation in the "translation" field.
+                    - Otherwise set "translation" to null.
+                    - "scene" is a short description of the whole image in the system language.
+                    """
                 },
                 {
                     "type": "input_image",
@@ -298,20 +351,33 @@ def process_new_image_openai():
 
     print("API:", time.time() - t)
 
-    data = json.loads(r.stdout)
-    texts = []
+    try:
+        data = json.loads(r.stdout)
 
-    for item in data.get("output", []):
-        for content in item.get("content", []):
-            if content.get("type") == "output_text":
-                texts.append(content["text"])
+        text = None
+        for item in data["output"]:
+            for content in item.get("content", []):
+                if content.get("type") == "output_text":
+                    text = content["text"]
+                    break
+            if text:
+                break
 
-    text = "\n".join(texts)
+        if not text:
+            raise ValueError("No output_text returned")
 
-    with open("text.txt", "w", encoding="utf-8") as f:
-        f.write(text)
+        result = json.loads(text)
 
-    read_text_file_aloud()    
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        print("OpenAI response error:", e)
+        speak_instruction(Instructions.TEXT_NOT_FOUND)
+        return
+
+    with open("text.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    finger_thread.join()
+    threading.Thread(target=read_text_file_aloud).start()
 
 
 def process_new_image_tesseract():
@@ -319,7 +385,8 @@ def process_new_image_tesseract():
     cleanup_photo_files()
     IMAGE = "img-no-finger.jpg"
     take_photo(IMAGE)
-    threading.Thread(target=find_finger_tip).start()
+    finger_thread = threading.Thread(target=find_finger_tip)
+    finger_thread.start()
 
     def deskew_angle(gray_img):
         edges = cv2.Canny(gray_img, 50, 150, apertureSize=3)
@@ -432,13 +499,28 @@ def process_new_image_tesseract():
         if len(b["text"].split()) >= MIN_WORD_COUNT and b["conf"] >= MIN_MEAN_CONF
     ]
 
+    t_prev = checkpoint("filter blocks", t_prev)
     print(len(blocks))
 
-    with open("text.txt", "w") as f:
-        for i, b in enumerate(blocks, start=1):
-            f.write(f"TEXT BLOCK {i}...\n\n")
-            f.write(b["text"])
-            f.write("...\n\n")
+    data = {
+        "scene": None,
+        "objects": [
+            {
+                "x": b["left"],
+                "y": b["top"],
+                "w": b["width"],
+                "h": b["height"],
+                "text": b["text"],
+                "translation": None
+            }
+            for b in blocks
+        ]
+    }
+
+    with open("text.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    t_prev = checkpoint("write text.json + words.png", t_prev)    
 
     for b in blocks:
         x, y, w, h = b["left"], b["top"], b["width"], b["height"]
@@ -446,32 +528,14 @@ def process_new_image_tesseract():
     cv2.imwrite("words.png", out)
     t_prev = checkpoint("write text.txt + words.png", t_prev)
 
-    # if a fingertip was detected while taking the photo, find the block
-    # it's closest to (in the same crop/rotate/downscale space as img) and
-    # read just that block instead of the whole page
-    if os.path.exists("finger-pos.txt") and blocks:
-        with open("finger-pos.txt") as f:
-            xt, yt = map(float, f.read().strip().split(","))
-        xt /= FACTOR
-        yt /= FACTOR
-
-        def block_dist(b):
-            cx = b["left"] + b["width"] / 2
-            cy = b["top"] + b["height"] / 2
-            return math.hypot(cx - xt, cy - yt)
-
-        closest = min(blocks, key=block_dist)
-        with open("finger.txt", "w") as f:
-            f.write(closest["text"])
-    t_prev = checkpoint("finger-pointing lookup", t_prev)
-
-    read_text_file_aloud()
-    t_prev = checkpoint("tts (rhvoice, backgrounded)", t_prev)
+    finger_thread.join()
+    threading.Thread(target=read_text_file_aloud).start()
 
 
 def find_finger_tip():
 
-    subprocess.run(["rm", "-f", CAM_IMG], check=True)
+    subprocess.run(["rm", "-f", "finger-pos.txt"], check=True)
+    speak_instruction(Instructions.POINT_BLOCK)
     time.sleep(2)
     IMAGE = "img-finger.jpg"
     take_photo(IMAGE)
@@ -482,13 +546,15 @@ def find_finger_tip():
     landmark = BlazeLandmark("blazehandlandmark")
     landmark.load_model("/home/pi/camera-to-speech-2/blaze_app_python/blaze_tflite/models/hand_landmark_lite.tflite")
 
-    img = cv2.imread(IMAGE)
-    orig_height = img.shape[0]
-
-    # downscale like the tesseract OCR pipeline, for faster hand detection
     img = cv2.resize(
-        cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-        None, fx=1/FACTOR, fy=1/FACTOR, interpolation=cv2.INTER_AREA
+        cv2.rotate(
+            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:], cv2.COLOR_BGR2RGB),
+            cv2.ROTATE_90_CLOCKWISE,
+        ),
+        None,
+        fx=1/FACTOR,
+        fy=1/FACTOR,
+        interpolation=cv2.INTER_AREA
     )
 
     t = time.time()
@@ -522,23 +588,25 @@ def find_finger_tip():
         # landmark 8 = index fingertip, in the FACTOR-downscaled image's
         # coordinate space - scale it back up to raw pixel coordinates
         # before the crop/rotate transform below
-        tip = landmarks[0, 8] * FACTOR
+        tip = landmarks[0, 8]
 
-        print("Index fingertip:", int(tip[0]), int(tip[1]))
+        print("Index fingertip:", int(tip[0]), int(tip[1])) # in full size cropped and rotated image space
 
-        # map (x, y) - found on the raw img-finger.jpg - into the coordinate
-        # space of the cropped + rotated + downscaled image
-        # process_new_image_tesseract() runs OCR on, so it lines up with the
-        # reported text block boxes
-        tx, ty = transform_to_ocr_space(tip[0], tip[1], orig_height)
+        cv2.circle(img, (int(tip[0]), int(tip[1])), 20, (0, 0, 255), 5)
+        cv2.imwrite("finger-result.jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
 
         with open("finger-pos.txt", "w") as f:
-            f.write(f"{tx},{ty}\n")
+            f.write(f"{tip[0]},{tip[1]}\n")
 
 
 def repeat_last_text():
     print("Repeat text")
-    read_text_file_aloud()
+    threading.Thread(target=read_text_file_aloud).start()
+
+def ask_again():
+    print("Asking again")
+    find_finger_tip()
+    threading.Thread(target=read_text_file_aloud).start()    
 
 # settings loop actions
 def change_language():
@@ -649,9 +717,10 @@ class Instructions(Enum):
 
 class MainMenu(Enum):
     READ_NEW_TEXT = 0
-    REPEAT_LAST_TEXT = 1
-    SETTINGS = 2
-    LEAVE = 3
+    ASK_AGAIN = 1
+    REPEAT_LAST_TEXT = 2
+    SETTINGS = 3
+    LEAVE = 4
 
 def main_loop():
     print("Main loop")
@@ -680,7 +749,10 @@ def main_loop():
 
         if event == True:
             if menu == MainMenu.READ_NEW_TEXT:
-                process_new_image_tesseract()
+                process_new_image_openai()
+
+            elif menu == MainMenu.ASK_AGAIN:
+                ask_again()
 
             elif menu == MainMenu.REPEAT_LAST_TEXT:
                 repeat_last_text()
