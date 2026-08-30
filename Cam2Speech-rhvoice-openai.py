@@ -1,0 +1,655 @@
+from email.mime import text
+import queue
+import signal
+from mpu6050 import mpu6050
+from gpiozero import Button
+from enum import Enum
+import subprocess
+import threading
+import time
+import cv2
+import csv
+import io
+import math
+import re
+import wave
+import numpy as np
+import subprocess
+import os
+import base64
+import json
+
+from tesserocr import PyTessBaseAPI, RIL
+from PIL import Image
+
+api = PyTessBaseAPI(
+    path="/usr/share/tesseract-ocr/5/tessdata",
+    lang="eng",
+    psm=6,
+)
+
+# os.setpriority(os.PRIO_PROCESS, 0, -10) # this causes interrupts (counter effect)
+
+# reduce image length & width by this factor before running OCR (speeds
+# things up on constrained hardware, at the cost of recognition accuracy on
+# small text - tesseract works best with ~20-30px tall characters, and that
+# shrinks along with the image). MIN_WORD_COUNT/MIN_MEAN_CONF below don't need
+# to change with FACTOR: word counts and confidence percentages are both
+# resolution-independent.
+FACTOR = 2
+
+# a paragraph must have at least this many recognized words, with at least
+# this mean confidence, to be treated as a real text block (vs. photo/logo
+# noise that Tesseract stumbles into on --psm 3 page segmentation)
+MIN_WORD_COUNT = 2
+MIN_MEAN_CONF = 60
+
+# Tesseract's own block_num/par_num grouping is unreliable - it estimates
+# paragraph/block boundaries from line spacing, and gets it wrong on both
+# very tight and very generous spacing. Instead, words are grouped into
+# blocks ourselves via dilation + connected components, based on how many
+# word-heights apart they are, which is far more predictable.
+# LINE_MERGE_FACTOR: bridge gaps between lines up to this many word-heights
+# apart (increase if a block with generous line spacing is still getting
+# split into multiple blocks).
+# WORD_MERGE_FACTOR: bridge gaps between words on the same line, and columns,
+# up to this many word-heights apart (increase if words on the same line
+# aren't merging; decrease if separate columns are merging together).
+LINE_MERGE_FACTOR = 3.0
+WORD_MERGE_FACTOR = 1.5
+
+# -------- deskew: correct slight camera rotation before running OCR --------
+# find near-horizontal line segments (text baselines, edges, etc.) via Hough
+# transform, and rotate by their median angle. Only lines within +-MAX_SKEW
+# degrees of horizontal are considered, so vertical lines (e.g. photo/logo
+# edges) don't throw off the estimate. This only corrects slight skew, not
+# 90/180-degree rotations (use tesseract's own OSD --psm 0 for that).
+MAX_SKEW = 20
+
+# deskew_angle only needs to find line directions, not read text, so it can
+# run on an even smaller image than the one used for OCR - faster, and the
+# detected angle is scale-independent so it still applies directly to img.
+DESKEW_FACTOR = 4
+
+# -------- contrast enhancement (CLAHE) before OCR --------
+# photographed pages usually have uneven lighting (shadows, flash falloff
+# across the page), so a single global equalize/normalize either does
+# nothing useful locally or blows out noise in already-bright regions.
+# CLAHE equalizes contrast within small tiles instead, which handles uneven
+# lighting much better.
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_TILE_SIZE = (8, 8)
+
+cam = None
+
+# ----------------------------------------------------------
+# Hardware
+# ----------------------------------------------------------
+
+touch = Button(22, pull_up=False)
+mpu = mpu6050(0x68)
+
+
+def wait_for_touch():
+    touch.wait_for_press()
+
+
+def wait_for_yes_no(timeout=5):
+
+    start = time.time()
+
+    while time.time() - start < timeout:
+
+        g = mpu.get_gyro_data()
+
+        # --------- tune these thresholds ----------
+        if abs(g["z"]) > 90:
+            return True      # nod
+
+        if abs(g["x"]) > 90:
+            return False     # shake
+        # ------------------------------------------
+
+    return None
+
+
+def read_text_file_aloud():
+    try:
+        with open("text.txt") as f:
+            text = f.read()
+    except FileNotFoundError:
+        text = ""
+
+    if not text.strip():
+        speak_instruction(Instructions.TEXT_NOT_FOUND)
+        return
+
+    subprocess.run(
+        'RHVoice-test -p alan -o - | aplay',
+        input=text,
+        text=True,
+        shell=True)
+
+
+def next_main_menu(menu):
+    items = list(MainMenu)
+    return items[(items.index(menu) + 1) % len(items)]
+
+def next_settings_menu(menu):
+    items = list(SettingsMenu)
+    return items[(items.index(menu) + 1) % len(items)]
+
+def speak_menu(menu):
+    text = {
+        MainMenu.READ_NEW_TEXT: "READ_NEW_TEXT",
+        MainMenu.REPEAT_LAST_TEXT: "REPEAT_LAST_TEXT",
+        MainMenu.SETTINGS: "SETTINGS",
+        MainMenu.LEAVE: "LEAVE",
+        SettingsMenu.CHANGE_LANGUAGE: "CHANGE_LANGUAGE",
+        SettingsMenu.CHANGE_SOUND_LEVEL: "CHANGE_SOUND_LEVEL",
+        SettingsMenu.LEAVE: "LEAVE",
+    }[menu]
+    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
+
+def speak_instruction(instruction):
+    text = {
+        Instructions.KEEP_CAMERA: "KEEP_CAMERA",
+        Instructions.PHOTO_TAKEN: "PHOTO_TAKEN",
+        Instructions.TEXT_NOT_FOUND: "TEXT_NOT_FOUND",
+    }[instruction]
+    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
+            
+
+# ----------------------------------------------------------
+# Actions
+# ----------------------------------------------------------
+
+def checkpoint(label, t_prev):
+    now = time.perf_counter()
+    print(f"[profile] {label}: {now - t_prev:.3f}s")
+    return now
+
+# main loop actions
+
+def take_photo():
+    # -------- profiling: checkpoints around each stage --------
+    t_prev = time.perf_counter()
+    global cam
+    if cam is None:
+        return
+
+    print("Capture image")
+    speak_instruction(Instructions.KEEP_CAMERA)  # not in thread!
+    subprocess.run(["rm", "-f", "text.txt", "img.jpg", "gray.png"], check=True)
+    cam.send_signal(signal.SIGUSR1)
+    # --signal makes rpicam-still perform a single capture then exit - wait for
+    # that exit so the file is guaranteed to be fully written before it's read
+    # below (sending the signal alone doesn't block until the capture and
+    # file write actually finish).
+    while not os.path.exists("img.jpg"):
+        time.sleep(0.1)
+    # process img.jpg
+    cam.terminate()
+    cam = None
+    #subprocess.run(["rpicam-still", "-t", "2000", "--width", "4608", "--height", "2592", "-o", "img.jpg"], check=True)
+    threading.Thread(target=speak_instruction, args=(Instructions.PHOTO_TAKEN,)).start()
+    t_prev = checkpoint("capture image", t_prev)
+
+
+def process_new_image_openai():
+
+    take_photo()
+
+    OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+
+    img = cv2.resize(
+        cv2.rotate(
+            cv2.cvtColor(cv2.imread("img.jpg")[:, 2304:], cv2.COLOR_BGR2GRAY),
+            cv2.ROTATE_90_CLOCKWISE,
+        ),
+        None,
+        fx=1/FACTOR,
+        fy=1/FACTOR,
+        interpolation=cv2.INTER_AREA
+    )
+
+    _, encoded = cv2.imencode(".jpg", img)
+    image = base64.b64encode(encoded).decode()
+
+    payload = {
+        "model": "gpt-5.6-luna",
+        "input": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "Extract readable text on the image."
+                },
+                {
+                    "type": "input_image",
+                    "image_url": f"data:image/jpeg;base64,{image}"
+                }
+            ]
+        }]
+    }
+
+    t = time.time()
+
+    r = subprocess.run(
+        [
+            "curl", "-s",
+            "https://api.openai.com/v1/responses",
+            "-H", "Authorization: Bearer " + OPENAI_API_KEY,
+            "-H", "Content-Type: application/json",
+            "--data-binary", "@-"
+        ],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True
+    )
+
+    print("API:", time.time() - t)
+
+    data = json.loads(r.stdout)
+    texts = []
+
+    for item in data.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") == "output_text":
+                texts.append(content["text"])
+
+    text = "\n".join(texts)
+
+    with open("text.txt", "w", encoding="utf-8") as f:
+        f.write(text)
+
+    read_text_file_aloud()    
+
+
+def process_new_image_tesseract():
+
+    take_photo()
+
+    def deskew_angle(gray_img):
+        edges = cv2.Canny(gray_img, 50, 150, apertureSize=3)
+        lines = cv2.HoughLinesP(
+            edges, 1, np.pi / 180, threshold=100,
+            minLineLength=gray_img.shape[1] // 4, maxLineGap=20,
+        )
+        if lines is None:
+            return 0.0
+
+        angles = [
+            math.degrees(math.atan2(y2 - y1, x2 - x1))
+            for x1, y1, x2, y2 in lines[:, 0]
+            if -MAX_SKEW <= math.degrees(math.atan2(y2 - y1, x2 - x1)) <= MAX_SKEW
+        ]
+        return float(np.median(angles)) if angles else 0.0
+
+
+    def rotate_image(gray_img, angle):
+        h, w = gray_img.shape
+        center = (w / 2, h / 2)
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        return cv2.warpAffine(
+            gray_img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+        )
+    # -------- profiling: checkpoints around each stage --------
+    t_prev = time.perf_counter()
+
+    img = cv2.resize(
+        cv2.rotate(
+            cv2.cvtColor(cv2.imread("img.jpg")[:, 2304:], cv2.COLOR_BGR2GRAY),
+            cv2.ROTATE_90_CLOCKWISE,
+        ),
+        None,
+        fx=1/FACTOR,
+        fy=1/FACTOR,
+        interpolation=cv2.INTER_AREA
+    )
+    t_prev = checkpoint("load + resize", t_prev)
+
+    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT, tileGridSize=CLAHE_TILE_SIZE)
+    img = clahe.apply(img)
+    t_prev = checkpoint("contrast enhancement (CLAHE)", t_prev)
+
+    deskew_img = cv2.resize(
+        img, (img.shape[1] // DESKEW_FACTOR, img.shape[0] // DESKEW_FACTOR)
+    )
+    angle = deskew_angle(deskew_img)
+    if abs(angle) > 0.1:
+        img = rotate_image(img, angle)
+    t_prev = checkpoint("deskew", t_prev)
+
+    out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+    # -------- single tesseract call does layout analysis + OCR in one pass --------
+    # --psm 3 (fully automatic page segmentation) finds paragraph/block boxes
+    # itself, so there's no need for MSER, dilation, or a separate OCR filter step.
+    ok, png = cv2.imencode(".png", img)
+    t_prev = checkpoint("encode png", t_prev)
+    api.SetImageBytes(
+        img.tobytes(),
+        img.shape[1],
+        img.shape[0],
+        1,
+        img.shape[1]
+    )
+    api.Recognize()
+    t_prev = checkpoint("tesseract OCR", t_prev)
+
+    words_all = []
+
+    ri = api.GetIterator()
+    if ri:
+        level = RIL.WORD
+        while True:
+            text = ri.GetUTF8Text(level) or ""
+            if text.strip():
+                x1, y1, x2, y2 = ri.BoundingBox(level)
+                words_all.append({
+                    "text": text,
+                    "left": x1,
+                    "top": y1,
+                    "width": x2 - x1,
+                    "height": y2 - y1,
+                    "conf": ri.Confidence(level),
+                })
+
+            if not ri.Next(level):
+                break
+    t_prev = checkpoint("parse tsv", t_prev)
+
+    # -------- group words into blocks via dilation + connected components --------
+    mask = np.zeros(img.shape, dtype=np.uint8)
+    heights = []
+    for w in words_all:
+        x, y = int(w["left"]), int(w["top"])
+        ww, hh = int(w["width"]), int(w["height"])
+        cv2.rectangle(mask, (x, y), (x + ww, y + hh), 255, -1)
+        heights.append(hh)
+
+    blocks = []
+    if words_all:
+        median_h = float(np.median(heights))
+        kw = max(1, int(round(median_h * WORD_MERGE_FACTOR)))
+        kh = max(1, int(round(median_h * LINE_MERGE_FACTOR)))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, kh))
+        mask = cv2.dilate(mask, kernel)
+
+        num_labels, labels = cv2.connectedComponents(mask, connectivity=8)
+
+        grouped = {}
+        for w in words_all:
+            x, y = int(w["left"]), int(w["top"])
+            ww, hh = int(w["width"]), int(w["height"])
+            cx, cy = min(x + ww // 2, mask.shape[1] - 1), min(y + hh // 2, mask.shape[0] - 1)
+            label = labels[cy, cx]
+            if label == 0:
+                continue
+            grouped.setdefault(label, []).append(w)
+
+        for words in grouped.values():
+            confs = [float(w["conf"]) for w in words if float(w["conf"]) >= 0]
+            if len(confs) < MIN_WORD_COUNT or sum(confs) / len(confs) < MIN_MEAN_CONF:
+                continue
+
+            xs1 = [int(w["left"]) for w in words]
+            ys1 = [int(w["top"]) for w in words]
+            xs2 = [int(w["left"]) + int(w["width"]) for w in words]
+            ys2 = [int(w["top"]) + int(w["height"]) for w in words]
+
+            x, y = min(xs1), min(ys1)
+            w, h = max(xs2) - x, max(ys2) - y
+            blocks.append((x, y, w, h, words, sum(confs) / len(confs)))
+
+    # -------- drop blocks fully contained inside another, larger block --------
+    # connected-component regions can be non-convex (e.g. a block wraps around
+    # a gap), so a separate, disjoint component's bbox can end up entirely
+    # inside another block's bounding rectangle even though they're unrelated
+    # - keep only the larger, containing block in that case.
+    def is_contained(inner, outer):
+        ix, iy, iw, ih = inner[:4]
+        ox, oy, ow, oh = outer[:4]
+        return ix >= ox and iy >= oy and ix + iw <= ox + ow and iy + ih <= oy + oh
+
+    blocks = [
+        b for i, b in enumerate(blocks)
+        if not any(
+            i != j and is_contained(b, o) and o[2] * o[3] > b[2] * b[3]
+            for j, o in enumerate(blocks)
+        )
+    ]
+    t_prev = checkpoint("block grouping (dilate + connected components)", t_prev)
+
+    # -------- rank blocks by likely relevance --------
+    # 1. distance to image center (camera is usually pointed at the target text,
+    #    so closer-to-center blocks are ranked first)
+    # 2. character count (more text = more likely to be the intended content,
+    #    vs. a short caption/watermark)
+    # 3. mean OCR confidence
+    # 4. block area (a bigger block is usually a more prominent piece of content)
+    #
+    # distance is bucketed into rings, so blocks that are roughly equally close
+    # to the center get ranked by the next criteria instead of by float noise.
+
+    img_h, img_w = img.shape
+    img_cx, img_cy = img_w / 2, img_h / 2
+    max_dist = math.hypot(img_cx, img_cy)
+
+    def block_priority(block):
+        x, y, w, h, words, mean_conf = block
+        cx, cy = x + w / 2, y + h / 2
+        dist_ratio = math.hypot(cx - img_cx, cy - img_cy) / max_dist  # 0=center, 1=corner
+        center_bucket = round(dist_ratio, 1)
+        char_count = sum(len(word["text"]) for word in words)
+        area = w * h
+        return (center_bucket, -char_count, -mean_conf, -area)
+
+    blocks.sort(key=block_priority)
+    blocks = [
+        (x, y, w, h, " ".join(word["text"] for word in words))
+        for x, y, w, h, words, mean_conf in blocks
+    ]
+    t_prev = checkpoint("ranking", t_prev)
+
+    print(len(blocks))
+
+    with open("text.txt", "w") as f:
+        for i, (x, y, w, h, text) in enumerate(blocks, start=1):
+            f.write(f"TEXT BLOCK {i}...\n\n")
+            f.write(text)
+            f.write("...\n\n")
+
+    for x, y, w, h, text in blocks:
+        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 1)     
+    cv2.imwrite("words.png", out)
+    t_prev = checkpoint("write text.txt + words.png", t_prev)
+
+    read_text_file_aloud()
+    t_prev = checkpoint("tts (rhvoice, backgrounded)", t_prev)
+
+
+def repeat_last_text():
+    print("Repeat text")
+    read_text_file_aloud()
+
+# settings loop actions
+def change_language():
+    print("Change language")
+
+def change_sound_level():
+    print("Change sound level")
+
+def stop_reading():
+
+    # signal speak_text_streaming() to stop, then pkill in case it's
+    # currently blocked writing to aplay's stdin (e.g. a full pipe buffer)
+    # so it can actually notice the signal and unwind - then block here
+    # until it has fully stopped, instead of racing ahead while it's still
+    # tearing down.
+    subprocess.run(["pkill", "aplay"], check=False)
+
+
+# wake_up() plays a short blip of silence before the first real speech, to
+# "wake up" the (usually bluetooth) audio sink from standby - without it, the
+# first syllable of the following phrase (e.g. "Read new text") gets cut off.
+# It used to run `ffmpeg -f lavfi -i anullsrc ... | aplay` to generate that
+# silence on the fly, which meant a shell + ffmpeg + aplay fork on every
+# single touch - and ffmpeg's own startup cost (loading its codec/format
+# libs) is slow on a Pi Zero 2. The silence is static, so it's generated once
+# at startup instead, and wake_up() just plays that file directly.
+WAKEUP_WAV_PATH = "wakeup.wav"
+
+
+def _generate_wakeup_wav(path, duration=0.25, rate=22050):
+    n_samples = int(duration * rate)
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(b"\x00\x00" * n_samples)
+
+
+_generate_wakeup_wav(WAKEUP_WAV_PATH)
+
+
+def wake_up():
+    global cam
+    subprocess.run(["aplay", WAKEUP_WAV_PATH], check=False)
+    cam = subprocess.Popen(
+        [
+            "rpicam-still",
+            "--signal",
+            "-t", "999999",
+            "--width", "4608",
+            "--height", "2592",
+            "-o", "img.jpg",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+# ----------------------------------------------------------
+# Settings menu
+# ----------------------------------------------------------
+class SettingsMenu(Enum):
+    CHANGE_LANGUAGE = 0
+    CHANGE_SOUND_LEVEL = 1
+    LEAVE = 2
+
+def settings_loop():
+    print("Settings loop")
+    menu = SettingsMenu.CHANGE_LANGUAGE
+
+    while True:
+        speak_menu(menu)
+        event = wait_for_yes_no()
+
+        if event == True:
+            if menu == SettingsMenu.CHANGE_LANGUAGE:
+                change_language()
+
+            elif menu == SettingsMenu.CHANGE_SOUND_LEVEL:
+                change_sound_level()
+
+            elif menu == SettingsMenu.LEAVE:
+                print("Returning to main menu")
+
+            return    
+                
+        elif event == False:
+            print("Moving to next menu")
+            menu = next_settings_menu(menu)
+            continue
+
+        elif event is None:  # timeout
+            print("Returning to main menu")
+            return
+
+#----------------------------------------------------------
+# Instructions 
+#----------------------------------------------------------
+
+class Instructions(Enum):
+    KEEP_CAMERA = 0
+    PHOTO_TAKEN = 1
+    TEXT_NOT_FOUND = 2
+
+# ----------------------------------------------------------
+# Main menu
+# ----------------------------------------------------------
+
+class MainMenu(Enum):
+    READ_NEW_TEXT = 0
+    REPEAT_LAST_TEXT = 1
+    SETTINGS = 2
+    LEAVE = 3
+
+def main_loop():
+    print("Main loop")
+    menu = MainMenu.READ_NEW_TEXT
+    wait_for_touch_flag = True
+    global cam
+
+    while True:
+        # stop any still-playing text-reading before starting new audio
+        # (wake-up beep and/or the menu announcement below) - otherwise the
+        # new audio has to wait for the audio device to free up, which can
+        # take as long as the leftover reading has left to play.
+
+        if wait_for_touch_flag:
+            if cam is not None:
+                cam.terminate()
+                cam = None
+            wait_for_touch()
+            wake_up()
+            print("Touch detected")
+
+        stop_reading()
+        wait_for_touch_flag = False
+        speak_menu(menu)
+        event = wait_for_yes_no()
+
+        if event == True:
+            if menu == MainMenu.READ_NEW_TEXT:
+                process_new_image_openai()
+
+            elif menu == MainMenu.REPEAT_LAST_TEXT:
+                repeat_last_text()
+
+            elif menu == MainMenu.SETTINGS:
+                settings_loop()
+
+            elif menu == MainMenu.LEAVE:
+                print("Leaving main menu")
+
+            menu = MainMenu.READ_NEW_TEXT
+            wait_for_touch_flag = True
+            print("Returning to main menu")
+            continue
+
+        elif event == False:
+            print("Moving to next menu")
+            menu = next_main_menu(menu)
+            continue
+
+        elif event is None:  # timeout
+            print("Returning to main menu")
+            menu = MainMenu.READ_NEW_TEXT
+            wait_for_touch_flag = True
+            continue
+
+
+
+if __name__ == "__main__":
+    try:
+        main_loop()
+    except KeyboardInterrupt:
+        print("Exiting program")
+
+        if cam is not None:
+            subprocess.run(["pkill", "rpicam-still"], check=False)
+
+        if api is not None:
+            api.End()
