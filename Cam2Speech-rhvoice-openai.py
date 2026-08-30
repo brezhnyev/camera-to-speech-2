@@ -25,7 +25,7 @@ from PIL import Image
 api = PyTessBaseAPI(
     path="/usr/share/tesseract-ocr/5/tessdata",
     lang="eng",
-    psm=6,
+    psm=3,
 )
 
 # os.setpriority(os.PRIO_PROCESS, 0, -10) # this causes interrupts (counter effect)
@@ -43,6 +43,7 @@ FACTOR = 2
 # noise that Tesseract stumbles into on --psm 3 page segmentation)
 MIN_WORD_COUNT = 2
 MIN_MEAN_CONF = 60
+MIN_WORD_CONF = 60
 
 # Tesseract's own block_num/par_num grouping is unreliable - it estimates
 # paragraph/block boundaries from line spacing, and gets it wrong on both
@@ -338,131 +339,60 @@ def process_new_image_tesseract():
     api.Recognize()
     t_prev = checkpoint("tesseract OCR", t_prev)
 
-    words_all = []
+    blocks = []
 
     ri = api.GetIterator()
     if ri:
-        level = RIL.WORD
-        while True:
-            text = ri.GetUTF8Text(level) or ""
-            if text.strip():
-                x1, y1, x2, y2 = ri.BoundingBox(level)
-                words_all.append({
-                    "text": text,
+        while True:  # one iteration per paragraph
+            x1, y1, x2, y2 = ri.BoundingBox(RIL.PARA)
+            para_conf = ri.Confidence(RIL.PARA)
+
+            # walk the words inside this paragraph, keeping only the ones
+            # confident enough - drops stray garbage characters/symbols
+            # Tesseract misreads from noise within an otherwise good paragraph
+            words = []
+            while True:
+                word_text = (ri.GetUTF8Text(RIL.WORD) or "").strip()
+                word_conf = ri.Confidence(RIL.WORD)
+                if word_text and word_conf >= MIN_WORD_CONF:
+                    words.append(word_text)
+
+                if ri.IsAtFinalElement(RIL.PARA, RIL.WORD):
+                    break
+                ri.Next(RIL.WORD)
+
+            if words:
+                blocks.append({
                     "left": x1,
                     "top": y1,
                     "width": x2 - x1,
                     "height": y2 - y1,
-                    "conf": ri.Confidence(level),
+                    "text": " ".join(words),
+                    "conf": para_conf,
                 })
 
-            if not ri.Next(level):
+            if not ri.Next(RIL.PARA):
                 break
     t_prev = checkpoint("parse tsv", t_prev)
 
-    # -------- group words into blocks via dilation + connected components --------
-    mask = np.zeros(img.shape, dtype=np.uint8)
-    heights = []
-    for w in words_all:
-        x, y = int(w["left"]), int(w["top"])
-        ww, hh = int(w["width"]), int(w["height"])
-        cv2.rectangle(mask, (x, y), (x + ww, y + hh), 255, -1)
-        heights.append(hh)
-
-    blocks = []
-    if words_all:
-        median_h = float(np.median(heights))
-        kw = max(1, int(round(median_h * WORD_MERGE_FACTOR)))
-        kh = max(1, int(round(median_h * LINE_MERGE_FACTOR)))
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, kh))
-        mask = cv2.dilate(mask, kernel)
-
-        num_labels, labels = cv2.connectedComponents(mask, connectivity=8)
-
-        grouped = {}
-        for w in words_all:
-            x, y = int(w["left"]), int(w["top"])
-            ww, hh = int(w["width"]), int(w["height"])
-            cx, cy = min(x + ww // 2, mask.shape[1] - 1), min(y + hh // 2, mask.shape[0] - 1)
-            label = labels[cy, cx]
-            if label == 0:
-                continue
-            grouped.setdefault(label, []).append(w)
-
-        for words in grouped.values():
-            confs = [float(w["conf"]) for w in words if float(w["conf"]) >= 0]
-            if len(confs) < MIN_WORD_COUNT or sum(confs) / len(confs) < MIN_MEAN_CONF:
-                continue
-
-            xs1 = [int(w["left"]) for w in words]
-            ys1 = [int(w["top"]) for w in words]
-            xs2 = [int(w["left"]) + int(w["width"]) for w in words]
-            ys2 = [int(w["top"]) + int(w["height"]) for w in words]
-
-            x, y = min(xs1), min(ys1)
-            w, h = max(xs2) - x, max(ys2) - y
-            blocks.append((x, y, w, h, words, sum(confs) / len(confs)))
-
-    # -------- drop blocks fully contained inside another, larger block --------
-    # connected-component regions can be non-convex (e.g. a block wraps around
-    # a gap), so a separate, disjoint component's bbox can end up entirely
-    # inside another block's bounding rectangle even though they're unrelated
-    # - keep only the larger, containing block in that case.
-    def is_contained(inner, outer):
-        ix, iy, iw, ih = inner[:4]
-        ox, oy, ow, oh = outer[:4]
-        return ix >= ox and iy >= oy and ix + iw <= ox + ow and iy + ih <= oy + oh
-
+    # drop paragraphs with too few words or too low confidence - filters out
+    # photo/logo noise Tesseract stumbles into on --psm 3 page segmentation
     blocks = [
-        b for i, b in enumerate(blocks)
-        if not any(
-            i != j and is_contained(b, o) and o[2] * o[3] > b[2] * b[3]
-            for j, o in enumerate(blocks)
-        )
+        b for b in blocks
+        if len(b["text"].split()) >= MIN_WORD_COUNT and b["conf"] >= MIN_MEAN_CONF
     ]
-    t_prev = checkpoint("block grouping (dilate + connected components)", t_prev)
-
-    # -------- rank blocks by likely relevance --------
-    # 1. distance to image center (camera is usually pointed at the target text,
-    #    so closer-to-center blocks are ranked first)
-    # 2. character count (more text = more likely to be the intended content,
-    #    vs. a short caption/watermark)
-    # 3. mean OCR confidence
-    # 4. block area (a bigger block is usually a more prominent piece of content)
-    #
-    # distance is bucketed into rings, so blocks that are roughly equally close
-    # to the center get ranked by the next criteria instead of by float noise.
-
-    img_h, img_w = img.shape
-    img_cx, img_cy = img_w / 2, img_h / 2
-    max_dist = math.hypot(img_cx, img_cy)
-
-    def block_priority(block):
-        x, y, w, h, words, mean_conf = block
-        cx, cy = x + w / 2, y + h / 2
-        dist_ratio = math.hypot(cx - img_cx, cy - img_cy) / max_dist  # 0=center, 1=corner
-        center_bucket = round(dist_ratio, 1)
-        char_count = sum(len(word["text"]) for word in words)
-        area = w * h
-        return (center_bucket, -char_count, -mean_conf, -area)
-
-    blocks.sort(key=block_priority)
-    blocks = [
-        (x, y, w, h, " ".join(word["text"] for word in words))
-        for x, y, w, h, words, mean_conf in blocks
-    ]
-    t_prev = checkpoint("ranking", t_prev)
 
     print(len(blocks))
 
     with open("text.txt", "w") as f:
-        for i, (x, y, w, h, text) in enumerate(blocks, start=1):
+        for i, b in enumerate(blocks, start=1):
             f.write(f"TEXT BLOCK {i}...\n\n")
-            f.write(text)
+            f.write(b["text"])
             f.write("...\n\n")
 
-    for x, y, w, h, text in blocks:
-        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 1)     
+    for b in blocks:
+        x, y, w, h = b["left"], b["top"], b["width"], b["height"]
+        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 1)
     cv2.imwrite("words.png", out)
     t_prev = checkpoint("write text.txt + words.png", t_prev)
 
@@ -613,7 +543,7 @@ def main_loop():
 
         if event == True:
             if menu == MainMenu.READ_NEW_TEXT:
-                process_new_image_openai()
+                process_new_image_tesseract()
 
             elif menu == MainMenu.REPEAT_LAST_TEXT:
                 repeat_last_text()
