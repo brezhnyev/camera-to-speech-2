@@ -102,6 +102,7 @@ CLAHE_TILE_SIZE = (8, 8)
 cam = None
 
 SYSTEM_LANGUAGE = "English"
+LOCAL_PROCESSING = True
 
 # ----------------------------------------------------------
 # Hardware
@@ -192,6 +193,19 @@ def next_main_menu(menu):
 def next_settings_menu(menu):
     items = list(SettingsMenu)
     return items[(items.index(menu) + 1) % len(items)]
+
+def speak_processing_menu(menu):
+    if LOCAL_PROCESSING:
+        text = {
+            ProcessingSettingsMenu.TOGGLE_PROCESSING: "ACTIVATE_ONLINE_PROCESSING",
+            ProcessingSettingsMenu.LEAVE: "LEAVE",
+        }[menu]
+    else:
+        text = {
+            ProcessingSettingsMenu.TOGGLE_PROCESSING: "ACTIVATE_OFFLINE_PROCESSING",
+            ProcessingSettingsMenu.LEAVE: "LEAVE",
+        }[menu]
+    subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
 
 def speak_menu(menu):
     text = {
@@ -615,6 +629,8 @@ def change_language():
 def change_sound_level():
     print("Change sound level")
 
+
+
 def stop_reading():
 
     # signal speak_text_streaming() to stop, then pkill in case it's
@@ -667,10 +683,42 @@ def wake_up():
 # ----------------------------------------------------------
 # Settings menu
 # ----------------------------------------------------------
+
+class ProcessingSettingsMenu(Enum):
+    TOGGLE_PROCESSING = 0
+    LEAVE = 1
+
+def processing_setting_loop():
+    global LOCAL_PROCESSING
+    print("Setting processing loop")
+    menu = ProcessingSettingsMenu.TOGGLE_PROCESSING
+
+    while True:
+        speak_processing_menu(menu)
+        event = wait_for_yes_no()
+        if event == True:
+            if menu == ProcessingSettingsMenu.TOGGLE_PROCESSING:
+                LOCAL_PROCESSING = not LOCAL_PROCESSING
+                print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
+                return
+            if menu == ProcessingSettingsMenu.LEAVE:
+                print("Returning to settings menu")
+                return
+        
+        elif event == False:
+            print("Moving to next menu")
+            menu = next_settings_menu(menu)
+            continue
+
+        elif event is None:  # timeout
+            print("Returning to main menu")
+            return
+
 class SettingsMenu(Enum):
     CHANGE_LANGUAGE = 0
     CHANGE_SOUND_LEVEL = 1
-    LEAVE = 2
+    TOGGLE_PROCESSING = 2
+    LEAVE = 3
 
 def settings_loop():
     print("Settings loop")
@@ -683,6 +731,9 @@ def settings_loop():
         if event == True:
             if menu == SettingsMenu.CHANGE_LANGUAGE:
                 change_language()
+
+            elif menu == SettingsMenu.TOGGLE_PROCESSING:
+                processing_setting_loop()
 
             elif menu == SettingsMenu.CHANGE_SOUND_LEVEL:
                 change_sound_level()
@@ -749,7 +800,10 @@ def main_loop():
 
         if event == True:
             if menu == MainMenu.READ_NEW_TEXT:
-                process_new_image_openai()
+                if LOCAL_PROCESSING:
+                    process_new_image_tesseract()
+                else:
+                    process_new_image_openai()
 
             elif menu == MainMenu.ASK_AGAIN:
                 ask_again()
