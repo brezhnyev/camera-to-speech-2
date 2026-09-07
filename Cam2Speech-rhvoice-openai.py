@@ -49,9 +49,11 @@ FACTOR = 2
 WIDTH = 4608
 HEIGHT = 2592
 
-# columns cropped off the left of img.jpg before OCR/finger-detection - must
-# match the [:, CROP_LEFT:] crop in process_new_image_tesseract()
-CROP_LEFT = WIDTH // 2
+# columns cropped off the left and right of the camera frame before
+# OCR/finger-detection, keeping the centered square region - must match the
+# [:, CROP_LEFT:CROP_RIGHT] crop in process_new_image_tesseract()
+CROP_LEFT = WIDTH // 4
+CROP_RIGHT = WIDTH * 3 // 4
 
 # rpicam-still always writes captures to this fixed path (see wake_up())
 CAM_IMG = "img.jpg"
@@ -209,7 +211,7 @@ def speak_processing_menu(menu):
 
 def speak_menu(menu):
     text = {
-        MainMenu.READ_NEW_TEXT: "READ_NEW_TEXT",
+        MainMenu.TAKE_NEW_PHOTO: "TAKE_NEW_PHOTO",
         MainMenu.ASK_AGAIN: "ASK_AGAIN",
         MainMenu.REPEAT_LAST_TEXT: "REPEAT_LAST_TEXT",
         MainMenu.SETTINGS: "SETTINGS",
@@ -290,7 +292,7 @@ def process_new_image_openai():
 
     img = cv2.resize(
         cv2.rotate(
-            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:], cv2.COLOR_BGR2RGB),
+            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
             cv2.ROTATE_90_CLOCKWISE,
         ),
         None,
@@ -432,7 +434,7 @@ def process_new_image_tesseract():
 
     img = cv2.resize(
         cv2.rotate(
-            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:], cv2.COLOR_BGR2GRAY),
+            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2GRAY),
             cv2.ROTATE_90_CLOCKWISE,
         ),
         None,
@@ -563,7 +565,7 @@ def find_finger_tip():
 
     img = cv2.resize(
         cv2.rotate(
-            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:], cv2.COLOR_BGR2RGB),
+            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
             cv2.ROTATE_90_CLOCKWISE,
         ),
         None,
@@ -768,7 +770,7 @@ class Instructions(Enum):
 # ----------------------------------------------------------
 
 class MainMenu(Enum):
-    READ_NEW_TEXT = 0
+    TAKE_NEW_PHOTO = 0
     ASK_AGAIN = 1
     REPEAT_LAST_TEXT = 2
     SETTINGS = 3
@@ -776,7 +778,7 @@ class MainMenu(Enum):
 
 def main_loop():
     print("Main loop")
-    menu = MainMenu.READ_NEW_TEXT
+    menu = MainMenu.TAKE_NEW_PHOTO
     wait_for_touch_flag = True
     global cam
 
@@ -800,7 +802,7 @@ def main_loop():
         event = wait_for_yes_no()
 
         if event == True:
-            if menu == MainMenu.READ_NEW_TEXT:
+            if menu == MainMenu.TAKE_NEW_PHOTO:
                 if LOCAL_PROCESSING:
                     process_new_image_tesseract()
                 else:
@@ -818,7 +820,7 @@ def main_loop():
             elif menu == MainMenu.LEAVE:
                 print("Leaving main menu")
 
-            menu = MainMenu.READ_NEW_TEXT
+            menu = MainMenu.TAKE_NEW_PHOTO
             wait_for_touch_flag = True
             print("Returning to main menu")
             continue
@@ -830,7 +832,7 @@ def main_loop():
 
         elif event is None:  # timeout
             print("Returning to main menu")
-            menu = MainMenu.READ_NEW_TEXT
+            menu = MainMenu.TAKE_NEW_PHOTO
             wait_for_touch_flag = True
             continue
 
