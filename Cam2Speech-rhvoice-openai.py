@@ -216,6 +216,7 @@ def speak_menu(menu):
         MainMenu.LEAVE: "LEAVE",
         SettingsMenu.CHANGE_LANGUAGE: "CHANGE_LANGUAGE",
         SettingsMenu.CHANGE_SOUND_LEVEL: "CHANGE_SOUND_LEVEL",
+        SettingsMenu.TOGGLE_PROCESSING: "TOGGLE_PROCESSING",
         SettingsMenu.LEAVE: "LEAVE",
     }[menu]
     subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
@@ -732,11 +733,11 @@ def settings_loop():
             if menu == SettingsMenu.CHANGE_LANGUAGE:
                 change_language()
 
-            elif menu == SettingsMenu.TOGGLE_PROCESSING:
-                processing_setting_loop()
-
             elif menu == SettingsMenu.CHANGE_SOUND_LEVEL:
                 change_sound_level()
+
+            elif menu == SettingsMenu.TOGGLE_PROCESSING:
+                processing_setting_loop()
 
             elif menu == SettingsMenu.LEAVE:
                 print("Returning to main menu")
