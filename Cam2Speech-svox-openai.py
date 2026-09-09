@@ -262,13 +262,9 @@ def read_text_file_aloud():
             raise
 
 
-def next_main_menu(menu):
-    items = list(MainMenu)
-    return items[(items.index(menu) + 1) % len(items)]
-
-def next_settings_menu(menu):
-    items = list(SettingsMenu)
-    return items[(items.index(menu) + 1) % len(items)]
+def next_menu(menu, option):
+    items = list(menu)
+    return items[(items.index(option) + 1) % len(items)]
 
 def next_language_menu(menu):
     items = list(LanguageMenu)
@@ -828,23 +824,23 @@ class ProcessingSettingsMenu(Enum):
 def processing_setting_loop():
     global LOCAL_PROCESSING
     print("Setting processing loop")
-    menu = ProcessingSettingsMenu.TOGGLE_PROCESSING
+    menu_option = ProcessingSettingsMenu.TOGGLE_PROCESSING
 
     while True:
-        speak_processing_menu(menu)
+        speak_processing_menu(menu_option)
         event = wait_for_yes_no()
         if event == True:
-            if menu == ProcessingSettingsMenu.TOGGLE_PROCESSING:
+            if menu_option == ProcessingSettingsMenu.TOGGLE_PROCESSING:
                 LOCAL_PROCESSING = not LOCAL_PROCESSING
                 print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
                 return
-            if menu == ProcessingSettingsMenu.LEAVE:
+            if menu_option == ProcessingSettingsMenu.LEAVE:
                 print("Returning to settings menu")
                 return
         
         elif event == False:
             print("Moving to next menu")
-            menu = next_settings_menu(menu)
+            menu_option = next_menu(ProcessingSettingsMenu, menu_option)
             continue
 
         elif event is None:  # timeout
@@ -859,30 +855,30 @@ class SettingsMenu(Enum):
 
 def settings_loop():
     print("Settings loop")
-    menu = SettingsMenu.CHANGE_LANGUAGE
+    menu_option = SettingsMenu.CHANGE_LANGUAGE
 
     while True:
-        speak_menu(menu)
+        speak_menu(menu_option)
         event = wait_for_yes_no()
 
         if event == True:
-            if menu == SettingsMenu.CHANGE_LANGUAGE:
+            if menu_option == SettingsMenu.CHANGE_LANGUAGE:
                 change_language_loop()
 
-            elif menu == SettingsMenu.CHANGE_SOUND_LEVEL:
+            elif menu_option == SettingsMenu.CHANGE_SOUND_LEVEL:
                 change_sound_level()
 
-            elif menu == SettingsMenu.TOGGLE_PROCESSING:
+            elif menu_option == SettingsMenu.TOGGLE_PROCESSING:
                 processing_setting_loop()
 
-            elif menu == SettingsMenu.LEAVE:
+            elif menu_option == SettingsMenu.LEAVE:
                 print("Returning to main menu")
 
             return    
                 
         elif event == False:
             print("Moving to next menu")
-            menu = next_settings_menu(menu)
+            menu_option = next_menu(SettingsMenu, menu_option)
             continue
 
         elif event is None:  # timeout
@@ -917,7 +913,7 @@ def main_loop():
     print("Main loop")
     subprocess.run(["aplay", WAKEUP_WAV_PATH], check=False)
     subprocess.run(["aplay", SOUND_DIR + "/READY_OPERATE.wav"], check=True)
-    menu = MainMenu.TAKE_NEW_PHOTO
+    menu_option = MainMenu.TAKE_NEW_PHOTO
     wait_for_touch_flag = True
     global cam
 
@@ -937,44 +933,44 @@ def main_loop():
 
         stop_reading()
         wait_for_touch_flag = False
-        speak_menu(menu)
+        speak_menu(menu_option)
         event = wait_for_yes_no()
 
         if event == True:
-            if menu == MainMenu.TAKE_NEW_PHOTO:
+            if menu_option == MainMenu.TAKE_NEW_PHOTO:
                 if LOCAL_PROCESSING:
                     process_new_image_tesseract()
                 else:
                     process_new_image_openai()
 
-            elif menu == MainMenu.ASK_AGAIN:
+            elif menu_option == MainMenu.ASK_AGAIN:
                 ask_again()
 
-            elif menu == MainMenu.REPEAT_LAST_TEXT:
+            elif menu_option == MainMenu.REPEAT_LAST_TEXT:
                 repeat_last_text()
 
-            elif menu == MainMenu.BATTERY_STATUS:
+            elif menu_option == MainMenu.BATTERY_STATUS:
                 check_battery_status()
 
-            elif menu == MainMenu.SETTINGS:
+            elif menu_option == MainMenu.SETTINGS:
                 settings_loop()
 
-            elif menu == MainMenu.LEAVE:
+            elif menu_option == MainMenu.LEAVE:
                 print("Leaving main menu")
 
-            menu = MainMenu.TAKE_NEW_PHOTO
+            menu_option = MainMenu.TAKE_NEW_PHOTO
             wait_for_touch_flag = True
             print("Returning to main menu")
             continue
 
         elif event == False:
             print("Moving to next menu")
-            menu = next_main_menu(menu)
+            menu_option = next_menu(MainMenu, menu_option)
             continue
 
         elif event is None:  # timeout
             print("Returning to main menu")
-            menu = MainMenu.TAKE_NEW_PHOTO
+            menu_option = MainMenu.TAKE_NEW_PHOTO
             wait_for_touch_flag = True
             continue
 
