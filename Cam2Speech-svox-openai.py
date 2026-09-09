@@ -831,8 +831,8 @@ def processing_setting_loop():
         event = wait_for_yes_no()
         if event == True:
             if menu_option == ProcessingSettingsMenu.TOGGLE_PROCESSING:
-                LOCAL_PROCESSING = not LOCAL_PROCESSING
                 print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
+                LOCAL_PROCESSING = not LOCAL_PROCESSING
                 return
             if menu_option == ProcessingSettingsMenu.LEAVE:
                 print("Returning to settings menu")
