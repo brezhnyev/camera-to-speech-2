@@ -34,10 +34,12 @@ TESSDATA_PATH = "/usr/share/tesseract-ocr/5/tessdata"
 LANGUAGE_CONFIG = {
     "EN": {
         "tesseract": "eng",
+        "nanotts": "en-GB",
         "battery": "Battery left: {percent:.0f} percent",
     },
     "DE": {
         "tesseract": "deu",
+        "nanotts": "de-DE",
         "battery": "Verbleibende Akkuladung: {percent:.0f} Prozent",
     },
 }
@@ -221,7 +223,12 @@ def read_text_file_aloud():
         speak_instruction(Instructions.TEXT_NOT_FOUND)
         return
 
-    subprocess.run([NANOTTS, "--play"], input=text, text=True, check=True)
+    subprocess.run(
+        [NANOTTS, "--language", LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["nanotts"], "--play"],
+        input=text,
+        text=True,
+        check=True,
+    )
 
 
 def next_main_menu(menu):
@@ -712,11 +719,8 @@ def change_sound_level():
 
 def stop_reading():
 
-    # signal speak_text_streaming() to stop, then pkill in case it's
-    # currently blocked writing to aplay's stdin (e.g. a full pipe buffer)
-    # so it can actually notice the signal and unwind - then block here
-    # until it has fully stopped, instead of racing ahead while it's still
-    # tearing down.
+    # nanotts owns playback directly when --play is used.
+    subprocess.run(["pkill", "-x", "nanotts"], check=False)
     subprocess.run(["pkill", "aplay"], check=False)
 
 
