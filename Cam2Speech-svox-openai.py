@@ -32,7 +32,7 @@ from PIL import Image
 
 TESSDATA_PATH = "/usr/share/tesseract-ocr/5/tessdata"
 LANGUAGE_CONFIG = {
-    "EN": {"tesseract": "eng", "pico2wave": "en-EN"},
+    "EN": {"tesseract": "eng", "pico2wave": "en-GB"},
     "DE": {"tesseract": "deu", "pico2wave": "de-DE"},
 }
 SYSTEM_LANGUAGE = "EN"
@@ -87,7 +87,7 @@ CROP_RIGHT = WIDTH
 # rpicam-still always writes captures to this fixed path (see wake_up())
 CAM_IMG = "img.jpg"
 TEXT_WAV = "text.wav"
-PICO2WAVE = "svox-pico/bin/pico2wave"
+PICO2WAVE = "svox-pico/builddir/bin/pico2wave"
 
 # a paragraph must have at least this many recognized words, with at least
 # this mean confidence, to be treated as a real text block (vs. photo/logo
