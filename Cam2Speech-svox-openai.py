@@ -32,8 +32,14 @@ from PIL import Image
 
 TESSDATA_PATH = "/usr/share/tesseract-ocr/5/tessdata"
 LANGUAGE_CONFIG = {
-    "EN": {"tesseract": "eng", "pico2wave": "en-GB"},
-    "DE": {"tesseract": "deu", "pico2wave": "de-DE"},
+    "EN": {
+        "tesseract": "eng",
+        "battery": "Battery left: {percent:.0f} percent",
+    },
+    "DE": {
+        "tesseract": "deu",
+        "battery": "Verbleibende Akkuladung: {percent:.0f} Prozent",
+    },
 }
 SYSTEM_LANGUAGE = "EN"
 SOUND_DIR = "sounds/" + SYSTEM_LANGUAGE
@@ -86,8 +92,7 @@ CROP_RIGHT = WIDTH
 
 # rpicam-still always writes captures to this fixed path (see wake_up())
 CAM_IMG = "img.jpg"
-TEXT_WAV = "text.wav"
-PICO2WAVE = "svox-pico/builddir/bin/pico2wave"
+NANOTTS = "nanotts/nanotts"
 
 # a paragraph must have at least this many recognized words, with at least
 # this mean confidence, to be treated as a real text block (vs. photo/logo
@@ -216,11 +221,7 @@ def read_text_file_aloud():
         speak_instruction(Instructions.TEXT_NOT_FOUND)
         return
 
-    subprocess.run(
-        [PICO2WAVE, "-l", LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["pico2wave"], "-w", TEXT_WAV, text],
-        check=True,
-    )
-    subprocess.run(["aplay", TEXT_WAV], check=True)
+    subprocess.run([NANOTTS, "--play"], input=text, text=True, check=True)
 
 
 def next_main_menu(menu):
@@ -298,7 +299,7 @@ def cleanup_photo_files():
     # since a session now takes two photos and the second one must not wipe
     # out the first photo/text.txt while they're still being processed
     subprocess.run(
-        ["rm", "-f", "text.json", TEXT_WAV, CAM_IMG, "img-finger.jpg", "finger-pos.txt", "battery.txt"],
+        ["rm", "-f", "text.json", CAM_IMG, "img-finger.jpg", "finger-pos.txt", "battery.txt"],
         check=True,
     )
 
@@ -700,7 +701,7 @@ def check_battery_status():
     print("Battery:", soc / 256, "%")
 
     with open("battery.txt", "w", encoding="utf-8") as f:
-        f.write(f"Battery left: {soc / 256:.0f} percent\n")
+        f.write(LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["battery"].format(percent=soc / 256) + "\n")
 
     read_text_file_aloud()
 
