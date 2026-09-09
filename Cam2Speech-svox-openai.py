@@ -191,7 +191,8 @@ def read_text_file_aloud():
 
         objects = data.get("objects", [])
 
-        # Finger exists -> read the closest object and all objects embedded in it
+        # Finger exists -> read the closest object, its containing parents,
+        # and all objects embedded in the outermost containing box.
         if os.path.exists("finger-pos.txt") and objects:
 
             with open("finger-pos.txt") as f:
@@ -202,13 +203,6 @@ def read_text_file_aloud():
                 cy = b["y"] + b["h"] / 2
                 return (cx - x) ** 2 + (cy - y) ** 2
 
-            remaining = list(objects)
-            selected = []
-
-            root = min(remaining, key=distance)
-            selected.append(root)
-            remaining.remove(root)
-
             def is_inside(inner, outer):
                 return (
                     inner["x"] >= outer["x"]
@@ -217,14 +211,31 @@ def read_text_file_aloud():
                     and inner["y"] + inner["h"] <= outer["y"] + outer["h"]
                 )
 
-            while remaining:
-                candidates = [obj for obj in remaining if is_inside(obj, root)]
-                if not candidates:
-                    break
+            root = min(objects, key=distance)
+            ancestors = [root]
+            current = root
 
-                candidate = min(candidates, key=distance)
-                selected.append(candidate)
-                remaining.remove(candidate)
+            while True:
+                parents = [
+                    obj for obj in objects
+                    if obj not in ancestors and is_inside(current, obj)
+                ]
+                if not parents:
+                    break
+                current = min(parents, key=lambda obj: obj["w"] * obj["h"])
+                ancestors.append(current)
+
+            outermost = ancestors[-1]
+            selected = list(reversed(ancestors))
+            selected.extend(
+                sorted(
+                    (
+                        obj for obj in objects
+                        if obj not in selected and is_inside(obj, outermost)
+                    ),
+                    key=distance,
+                )
+            )
 
             text = "\n".join(
                 obj["translation"] or obj["text"]
