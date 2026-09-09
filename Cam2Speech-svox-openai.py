@@ -675,7 +675,7 @@ def find_finger_tip():
             f.write(f"{tip[0]},{tip[1]}\n")
 
     else:
-        threading.Thread(target=speak_instruction, args=(Instructions.NO_HAND_FOUND,)).start()
+        speak_instruction(Instructions.NO_HAND_FOUND)
 
 
 def repeat_last_text():
