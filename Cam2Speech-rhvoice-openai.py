@@ -286,6 +286,7 @@ def take_photo(name):
     os.replace(CAM_IMG, name)
     if (name == "img-finger.jpg"): # TODO: nicer way to do this
         cam.terminate()
+        cam.wait(timeout=5)
         cam = None
     t_prev = checkpoint("capture image", t_prev)
 
@@ -300,8 +301,12 @@ def process_new_image_openai():
 
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
+    source = cv2.imread(IMAGE)
+    if source is None:
+        return
+
     raw = cv2.rotate(
-        cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT],
+        source[:, CROP_LEFT:CROP_RIGHT],
         cv2.ROTATE_90_CLOCKWISE,
     )
     img = cv2.resize(
@@ -441,8 +446,12 @@ def process_new_image_tesseract():
     # -------- profiling: checkpoints around each stage --------
     t_prev = time.perf_counter()
 
+    source = cv2.imread(IMAGE)
+    if source is None:
+        return
+
     raw = cv2.rotate(
-        cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2GRAY),
+        cv2.cvtColor(source[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2GRAY),
         cv2.ROTATE_90_CLOCKWISE,
     )
     img = cv2.resize(
@@ -569,8 +578,12 @@ def find_finger_tip():
     landmark = BlazeLandmark("blazehandlandmark")
     landmark.load_model("/home/pi/camera-to-speech-2/blaze_app_python/blaze_tflite/models/hand_landmark_lite.tflite")
 
+    source = cv2.imread(IMAGE)
+    if source is None:
+        return
+
     raw = cv2.rotate(
-        cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
+        cv2.cvtColor(source[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
         cv2.ROTATE_90_CLOCKWISE,
     )
     img = cv2.resize(
