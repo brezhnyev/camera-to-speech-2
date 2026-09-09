@@ -224,7 +224,7 @@ def read_text_file_aloud():
         return
 
     subprocess.run(
-        [NANOTTS, "--language", LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["nanotts"], "--play"],
+        [NANOTTS, "-v", LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["nanotts"], "--play"],
         input=text,
         text=True,
         check=True,
