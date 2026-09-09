@@ -237,6 +237,8 @@ def speak_instruction(instruction):
         Instructions.PHOTO_TAKEN: "PHOTO_TAKEN",
         Instructions.TEXT_NOT_FOUND: "TEXT_NOT_FOUND",
         Instructions.POINT_BLOCK: "POINT_BLOCK",
+        Instructions.HAND_FOUND: "HAND_FOUND",
+        Instructions.NO_HAND_FOUND: "NO_HAND_FOUND",
     }[instruction]
     subprocess.run(["aplay", "sounds/" + text + ".wav"], check=True)
             
