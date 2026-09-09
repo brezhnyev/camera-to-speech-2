@@ -19,6 +19,7 @@ import os
 import base64
 import json
 import sys
+import smbus
 
 sys.path.insert(0, "/home/pi/camera-to-speech-2/blaze_app_python")
 sys.path.insert(0, "/home/pi/camera-to-speech-2/blaze_app_python/blaze_common")
@@ -43,7 +44,7 @@ api = PyTessBaseAPI(
 # shrinks along with the image). MIN_WORD_COUNT/MIN_MEAN_CONF below don't need
 # to change with FACTOR: word counts and confidence percentages are both
 # resolution-independent.
-FACTOR = 2
+FACTOR = 1
 
 # raspi camera capture resolution - must match wake_up()'s rpicam-still --width/--height
 WIDTH = 4608
@@ -52,8 +53,8 @@ HEIGHT = 2592
 # columns cropped off the left and right of the camera frame before
 # OCR/finger-detection, keeping the centered square region - must match the
 # [:, CROP_LEFT:CROP_RIGHT] crop in process_new_image_tesseract()
-CROP_LEFT = WIDTH // 4
-CROP_RIGHT = WIDTH * 3 // 4
+CROP_LEFT = (WIDTH-HEIGHT)
+CROP_RIGHT = WIDTH
 
 # rpicam-still always writes captures to this fixed path (see wake_up())
 CAM_IMG = "img.jpg"
@@ -139,42 +140,48 @@ def wait_for_yes_no(timeout=5):
 
 def read_text_file_aloud():
 
-    try:
-        with open("text.json", encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        speak_instruction(Instructions.TEXT_NOT_FOUND)
-        return
+    text = ""
 
-    objects = data.get("objects", [])
+    if os.path.exists("battery.txt"):
+        text = open("battery.txt", encoding="utf-8").read()
 
-    # Finger exists -> read closest object
-    if os.path.exists("finger-pos.txt") and objects:
-
-        with open("finger-pos.txt") as f:
-            x, y = map(float, f.read().strip().split(","))
-
-        def distance(b):
-            cx = b["x"] + b["w"] / 2
-            cy = b["y"] + b["h"] / 2
-            return (cx - x) ** 2 + (cy - y) ** 2
-
-        obj = min(objects, key=distance)
-        text = obj["translation"] or obj["text"]
-
-    # No finger -> scene + all objects
     else:
-        texts = []
+        try:
+            with open("text.json", encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            speak_instruction(Instructions.TEXT_NOT_FOUND)
+            return
 
-        if data.get("scene"):
-            texts.append(data["scene"])
+        objects = data.get("objects", [])
 
-        for obj in objects:
+        # Finger exists -> read closest object
+        if os.path.exists("finger-pos.txt") and objects:
+
+            with open("finger-pos.txt") as f:
+                x, y = map(float, f.read().strip().split(","))
+
+            def distance(b):
+                cx = b["x"] + b["w"] / 2
+                cy = b["y"] + b["h"] / 2
+                return (cx - x) ** 2 + (cy - y) ** 2
+
+            obj = min(objects, key=distance)
             text = obj["translation"] or obj["text"]
-            if text:
-                texts.append(text)
 
-        text = "\n".join(texts)
+        # No finger -> scene + all objects
+        else:
+            texts = []
+
+            if data.get("scene"):
+                texts.append(data["scene"])
+
+            for obj in objects:
+                text = obj["translation"] or obj["text"]
+                if text:
+                    texts.append(text)
+
+            text = "\n".join(texts)
 
     if not text.strip():
         speak_instruction(Instructions.TEXT_NOT_FOUND)
@@ -214,6 +221,7 @@ def speak_menu(menu):
         MainMenu.TAKE_NEW_PHOTO: "TAKE_NEW_PHOTO",
         MainMenu.ASK_AGAIN: "ASK_AGAIN",
         MainMenu.REPEAT_LAST_TEXT: "REPEAT_LAST_TEXT",
+        MainMenu.BATTERY_STATUS: "BATTERY_STATUS",
         MainMenu.SETTINGS: "SETTINGS",
         MainMenu.LEAVE: "LEAVE",
         SettingsMenu.CHANGE_LANGUAGE: "CHANGE_LANGUAGE",
@@ -249,7 +257,7 @@ def cleanup_photo_files():
     # since a session now takes two photos and the second one must not wipe
     # out the first photo/text.txt while they're still being processed
     subprocess.run(
-        ["rm", "-f", "text.json", CAM_IMG, "img-finger.jpg", "finger-pos.txt"],
+        ["rm", "-f", "text.json", CAM_IMG, "img-finger.jpg", "finger-pos.txt", "battery.txt"],
         check=True,
     )
 
@@ -290,14 +298,13 @@ def process_new_image_openai():
 
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
+    raw = cv2.rotate(
+        cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT],
+        cv2.ROTATE_90_CLOCKWISE,
+    )
     img = cv2.resize(
-        cv2.rotate(
-            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
-            cv2.ROTATE_90_CLOCKWISE,
-        ),
-        None,
-        fx=1/FACTOR,
-        fy=1/FACTOR,
+        raw,
+        (round(raw.shape[1] / FACTOR), round(raw.shape[0] / FACTOR)),
         interpolation=cv2.INTER_AREA
     )
 
@@ -432,14 +439,13 @@ def process_new_image_tesseract():
     # -------- profiling: checkpoints around each stage --------
     t_prev = time.perf_counter()
 
+    raw = cv2.rotate(
+        cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2GRAY),
+        cv2.ROTATE_90_CLOCKWISE,
+    )
     img = cv2.resize(
-        cv2.rotate(
-            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2GRAY),
-            cv2.ROTATE_90_CLOCKWISE,
-        ),
-        None,
-        fx=1/FACTOR,
-        fy=1/FACTOR,
+        raw,
+        (round(raw.shape[1] / FACTOR), round(raw.shape[0] / FACTOR)),
         interpolation=cv2.INTER_AREA
     )
     t_prev = checkpoint("load + resize", t_prev)
@@ -461,8 +467,6 @@ def process_new_image_tesseract():
     # -------- single tesseract call does layout analysis + OCR in one pass --------
     # --psm 3 (fully automatic page segmentation) finds paragraph/block boxes
     # itself, so there's no need for MSER, dilation, or a separate OCR filter step.
-    ok, png = cv2.imencode(".png", img)
-    t_prev = checkpoint("encode png", t_prev)
     api.SetImageBytes(
         img.tobytes(),
         img.shape[1],
@@ -537,13 +541,13 @@ def process_new_image_tesseract():
     with open("text.json", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    t_prev = checkpoint("write text.json + words.png", t_prev)    
+    t_prev = checkpoint("write text.json + words.jpg", t_prev)
 
     for b in blocks:
         x, y, w, h = b["left"], b["top"], b["width"], b["height"]
         cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 1)
-    cv2.imwrite("words.png", out)
-    t_prev = checkpoint("write text.txt + words.png", t_prev)
+    cv2.imwrite("words.jpg", out)
+    t_prev = checkpoint("write text.txt + words.jpg", t_prev)
 
     finger_thread.join()
     threading.Thread(target=read_text_file_aloud).start()
@@ -563,14 +567,13 @@ def find_finger_tip():
     landmark = BlazeLandmark("blazehandlandmark")
     landmark.load_model("/home/pi/camera-to-speech-2/blaze_app_python/blaze_tflite/models/hand_landmark_lite.tflite")
 
+    raw = cv2.rotate(
+        cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
+        cv2.ROTATE_90_CLOCKWISE,
+    )
     img = cv2.resize(
-        cv2.rotate(
-            cv2.cvtColor(cv2.imread(IMAGE)[:, CROP_LEFT:CROP_RIGHT], cv2.COLOR_BGR2RGB),
-            cv2.ROTATE_90_CLOCKWISE,
-        ),
-        None,
-        fx=1/FACTOR,
-        fy=1/FACTOR,
+        raw,
+        (round(raw.shape[1] / FACTOR), round(raw.shape[0] / FACTOR)),
         interpolation=cv2.INTER_AREA
     )
 
@@ -623,7 +626,25 @@ def repeat_last_text():
 def ask_again():
     print("Asking again")
     find_finger_tip()
-    threading.Thread(target=read_text_file_aloud).start()    
+    threading.Thread(target=read_text_file_aloud).start()
+
+def check_battery_status():
+    print("Checking battery status")
+    bus = smbus.SMBus(1)
+
+    v = bus.read_word_data(0x36, 0x02)
+    v = ((v & 0xFF) << 8) | (v >> 8)
+
+    soc = bus.read_word_data(0x36, 0x04)
+    soc = ((soc & 0xFF) << 8) | (soc >> 8)
+
+    print("Voltage:", v * 1.25 / 1000 / 16, "V")
+    print("Battery:", soc / 256, "%")
+
+    with open("battery.txt", "w", encoding="utf-8") as f:
+        f.write(f"Battery left: {soc / 256:.0f} percent\n")
+
+    read_text_file_aloud()
 
 # settings loop actions
 def change_language():
@@ -773,11 +794,14 @@ class MainMenu(Enum):
     TAKE_NEW_PHOTO = 0
     ASK_AGAIN = 1
     REPEAT_LAST_TEXT = 2
-    SETTINGS = 3
-    LEAVE = 4
+    BATTERY_STATUS = 3
+    SETTINGS = 4
+    LEAVE = 5
 
 def main_loop():
     print("Main loop")
+    subprocess.run(["aplay", WAKEUP_WAV_PATH], check=False)
+    subprocess.run(["aplay", "sounds/READY_OPERATE.wav"], check=True)
     menu = MainMenu.TAKE_NEW_PHOTO
     wait_for_touch_flag = True
     global cam
@@ -813,6 +837,9 @@ def main_loop():
 
             elif menu == MainMenu.REPEAT_LAST_TEXT:
                 repeat_last_text()
+
+            elif menu == MainMenu.BATTERY_STATUS:
+                check_battery_status()
 
             elif menu == MainMenu.SETTINGS:
                 settings_loop()
