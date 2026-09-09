@@ -585,6 +585,7 @@ def find_finger_tip():
     print("Hands:", len(nd))
 
     if len(nd):
+        threading.Thread(target=speak_instruction, args=(Instructions.HAND_FOUND,)).start()
         detections = detector.denormalize_detections(nd, scale1, pad1)
 
         xc, yc, scale, theta = detector.detection2roi(detections)
@@ -617,6 +618,9 @@ def find_finger_tip():
 
         with open("finger-pos.txt", "w") as f:
             f.write(f"{tip[0]},{tip[1]}\n")
+
+    else:
+        threading.Thread(target=speak_instruction, args=(Instructions.NO_HAND_FOUND,)).start()
 
 
 def repeat_last_text():
@@ -785,6 +789,8 @@ class Instructions(Enum):
     PHOTO_TAKEN = 1
     TEXT_NOT_FOUND = 2
     POINT_BLOCK = 3
+    HAND_FOUND = 4
+    NO_HAND_FOUND = 5
 
 # ----------------------------------------------------------
 # Main menu
