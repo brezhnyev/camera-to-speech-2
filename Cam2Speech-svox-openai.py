@@ -191,7 +191,7 @@ def read_text_file_aloud():
 
         objects = data.get("objects", [])
 
-        # Finger exists -> read closest object
+        # Finger exists -> read the closest object and all objects embedded in it
         if os.path.exists("finger-pos.txt") and objects:
 
             with open("finger-pos.txt") as f:
@@ -202,8 +202,35 @@ def read_text_file_aloud():
                 cy = b["y"] + b["h"] / 2
                 return (cx - x) ** 2 + (cy - y) ** 2
 
-            obj = min(objects, key=distance)
-            text = obj["translation"] or obj["text"]
+            remaining = list(objects)
+            selected = []
+
+            root = min(remaining, key=distance)
+            selected.append(root)
+            remaining.remove(root)
+
+            def is_inside(inner, outer):
+                return (
+                    inner["x"] >= outer["x"]
+                    and inner["y"] >= outer["y"]
+                    and inner["x"] + inner["w"] <= outer["x"] + outer["w"]
+                    and inner["y"] + inner["h"] <= outer["y"] + outer["h"]
+                )
+
+            while remaining:
+                candidates = [obj for obj in remaining if is_inside(obj, root)]
+                if not candidates:
+                    break
+
+                candidate = min(candidates, key=distance)
+                selected.append(candidate)
+                remaining.remove(candidate)
+
+            text = "\n".join(
+                obj["translation"] or obj["text"]
+                for obj in selected
+                if obj.get("translation") or obj.get("text")
+            )
 
         # No finger -> scene + all objects
         else:
