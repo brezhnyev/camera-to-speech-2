@@ -223,12 +223,16 @@ def read_text_file_aloud():
         speak_instruction(Instructions.TEXT_NOT_FOUND)
         return
 
-    subprocess.run(
-        [NANOTTS, "-v", LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["nanotts"], "--play"],
-        input=text,
-        text=True,
-        check=True,
-    )
+    try:
+        subprocess.run(
+            [NANOTTS, "-v", LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["nanotts"], "--play"],
+            input=text,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        if error.returncode != -signal.SIGTERM:
+            raise
 
 
 def next_main_menu(menu):
