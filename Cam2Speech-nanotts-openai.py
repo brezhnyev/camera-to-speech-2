@@ -203,20 +203,8 @@ def speak_language_menu(menu):
     text = {
         LanguageMenu.ENGLISH: "ENGLISH",
         LanguageMenu.GERMAN: "GERMAN",
+        LanguageMenu.LEAVE: "LEAVE",
     }[menu]
-    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"], check=True)
-
-def speak_processing_menu(menu):
-    if LOCAL_PROCESSING:
-        text = {
-            ProcessingSettingsMenu.TOGGLE_PROCESSING: "ACTIVATE_ONLINE_PROCESSING",
-            ProcessingSettingsMenu.LEAVE: "LEAVE",
-        }[menu]
-    else:
-        text = {
-            ProcessingSettingsMenu.TOGGLE_PROCESSING: "ACTIVATE_OFFLINE_PROCESSING",
-            ProcessingSettingsMenu.LEAVE: "LEAVE",
-        }[menu]
     subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"], check=True)
 
 def speak_menu(menu):
@@ -259,21 +247,6 @@ def play_waiting_sound(stop_event):
                 player.wait()
                 return
 
-def set_system_language(language):
-    global SYSTEM_LANGUAGE, SOUND_DIR, api
-
-    if language not in LANGUAGE_CONFIG:
-        raise ValueError(f"Unsupported language: {language}")
-
-    if language == SYSTEM_LANGUAGE:
-        subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
-        return
-
-    api.End()
-    SYSTEM_LANGUAGE = language
-    SOUND_DIR = "sounds/" + SYSTEM_LANGUAGE
-    api = create_tesseract_api()
-    subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
 # ----------------------------------------------------------
 # Actions
 # ----------------------------------------------------------
@@ -745,9 +718,26 @@ def wake_up():
 # ----------------------------------------------------------
 
 # settings loop actions
+def set_system_language(language):
+    global SYSTEM_LANGUAGE, SOUND_DIR, api
+
+    if language not in LANGUAGE_CONFIG:
+        raise ValueError(f"Unsupported language: {language}")
+
+    if language == SYSTEM_LANGUAGE:
+        subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
+        return
+
+    api.End()
+    SYSTEM_LANGUAGE = language
+    SOUND_DIR = "sounds/" + SYSTEM_LANGUAGE
+    api = create_tesseract_api()
+    subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
+
 class LanguageMenu(Enum):
     ENGLISH = "EN"
     GERMAN = "DE"
+    LEAVE = "LEAVE"
 
 def change_language_loop():
     menu = LanguageMenu.ENGLISH
@@ -767,39 +757,24 @@ def change_language_loop():
 
         return
 
-class ProcessingSettingsMenu(Enum):
-    TOGGLE_PROCESSING = 0
-    LEAVE = 1
-
-def processing_setting_loop():
+def set_processing_mode():
     global LOCAL_PROCESSING
     print("Setting processing loop")
-    menu_option = ProcessingSettingsMenu.TOGGLE_PROCESSING
 
-    while True:
-        speak_processing_menu(menu_option)
-        event = wait_for_yes_no()
-        if event == True:
-            if menu_option == ProcessingSettingsMenu.TOGGLE_PROCESSING:
-                print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
-                LOCAL_PROCESSING = not LOCAL_PROCESSING
-                if (LOCAL_PROCESSING):
-                    subprocess.run(["aplay", SOUND_DIR + "/OFFLINE_MODE_SET.wav"], check=True)
-                else:
-                    subprocess.run(["aplay", SOUND_DIR + "/ONLINE_MODE_SET.wav"], check=True)
-                return
-            if menu_option == ProcessingSettingsMenu.LEAVE:
-                print("Returning to settings menu")
-                return
-        
-        elif event == False:
-            print("Moving to next menu")
-            menu_option = next_menu(ProcessingSettingsMenu, menu_option)
-            continue
+    if LOCAL_PROCESSING:
+        subprocess.run(["aplay", SOUND_DIR + "/ACTIVATE_ONLINE_PROCESSING.wav"], check=True)
+    else:
+        subprocess.run(["aplay", SOUND_DIR + "/ACTIVATE_OFFLINE_PROCESSING.wav"], check=True)
+    event = wait_for_yes_no()
+    if event == True:
+        print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
+        LOCAL_PROCESSING = not LOCAL_PROCESSING
+        if (LOCAL_PROCESSING):
+            subprocess.run(["aplay", SOUND_DIR + "/OFFLINE_MODE_SET.wav"], check=True)
+        else:
+            subprocess.run(["aplay", SOUND_DIR + "/ONLINE_MODE_SET.wav"], check=True)
 
-        elif event is None:  # timeout
-            print("Returning to main menu")
-            return
+    return # in case of False or timeout, just return to main menu
 
 class SettingsMenu(Enum):
     CHANGE_LANGUAGE = 0
@@ -823,22 +798,21 @@ def settings_loop():
                 change_sound_level()
 
             elif menu_option == SettingsMenu.TOGGLE_PROCESSING:
-                processing_setting_loop()
+                set_processing_mode()
 
             elif menu_option == SettingsMenu.LEAVE:
                 print("Returning to main menu")
 
-            return    
-                
-        elif event == False:
-            print("Moving to next menu")
-            menu_option = next_menu(SettingsMenu, menu_option)
-            continue
+            return
 
         elif event is None:  # timeout
             print("Returning to main menu")
             return
 
+        elif event == False: # this will move to the next menu option
+            pass
+
+        menu_option = next_menu(SettingsMenu, menu_option)
 #----------------------------------------------------------
 # Instructions 
 #----------------------------------------------------------
