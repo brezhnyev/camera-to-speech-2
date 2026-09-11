@@ -258,6 +258,20 @@ def speak_instruction(instruction):
     subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"], check=True)
             
 
+def play_waiting_sound(stop_event):
+    while not stop_event.is_set():
+        player = subprocess.Popen(
+            ["aplay", "sounds/clock-tick.wav"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        while player.poll() is None:
+            if stop_event.wait(0.05):
+                player.terminate()
+                player.wait()
+                return
+
 # ----------------------------------------------------------
 # Actions
 # ----------------------------------------------------------
@@ -406,10 +420,15 @@ def process_new_image_openai():
     t = time.time()
 
     try:
+        stop_tick = threading.Event()
+        tick_thread = threading.Thread(
+            target=play_waiting_sound,
+            args=(stop_tick,)
+        )
+        tick_thread.start()
         # upload the image once so both requests below can reference it by
         # file_id, instead of re-sending the base64-encoded image twice
         file_id = upload_image_openai(OPENAI_API_KEY, encoded.tobytes())
-
         scene_response = request_openai_text(
             OPENAI_API_KEY, file_id,
             f"""
@@ -423,6 +442,10 @@ def process_new_image_openai():
             """
         )
         scene_text, scene_translation = parse_original_and_translation(scene_response)
+    finally:
+        stop_tick.set()
+        tick_thread.join()
+        subprocess.run(["aplay", "sounds/microwave.wav"], check=False)
 
         # read the scene aloud right away - translation if there is one,
         # otherwise the original - while the text-detection request for the
