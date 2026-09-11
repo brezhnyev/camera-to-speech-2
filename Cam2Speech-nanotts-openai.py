@@ -266,6 +266,7 @@ def set_system_language(language):
         raise ValueError(f"Unsupported language: {language}")
 
     if language == SYSTEM_LANGUAGE:
+        subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
         return
 
     api.End()
