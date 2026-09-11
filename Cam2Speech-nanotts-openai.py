@@ -442,7 +442,6 @@ def process_new_image_openai():
             """
         )
         scene_text, scene_translation = parse_original_and_translation(scene_response)
-    finally:
         stop_tick.set()
         tick_thread.join()
         subprocess.run(["aplay", "sounds/microwave.wav"], check=False)
@@ -514,6 +513,13 @@ def process_new_image_tesseract():
     cleanup_photo_files()
     IMAGE = "img-no-finger.jpg"
     take_photo(IMAGE)
+
+    stop_tick = threading.Event()
+    tick_thread = threading.Thread(
+        target=play_waiting_sound,
+        args=(stop_tick,)
+    )
+    tick_thread.start()
 
     def deskew_angle(gray_img):
         edges = cv2.Canny(gray_img, 50, 150, apertureSize=3)
@@ -646,6 +652,9 @@ def process_new_image_tesseract():
 
     cv2.imwrite("words.jpg", out)
     t_prev = checkpoint("write text.txt + words.jpg", t_prev)
+
+    stop_tick.set()
+    tick_thread.join()
 
     threading.Thread(target=read_text_file_aloud).start()
 
