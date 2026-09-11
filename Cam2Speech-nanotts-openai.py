@@ -14,9 +14,12 @@ import subprocess
 import os
 import json
 import smbus
+import sys
 
 from tesserocr import PyTessBaseAPI, RIL
 from PIL import Image
+
+DEBUG = len(sys.argv) > 1 and sys.argv[1].lower() == "debug"
 
 TESSDATA_PATH = "/usr/share/tesseract-ocr/5/tessdata"
 LANGUAGE_CONFIG = {
@@ -48,20 +51,6 @@ def create_tesseract_api():
 api = create_tesseract_api()
 
 
-def set_system_language(language):
-    global SYSTEM_LANGUAGE, SOUND_DIR, api
-
-    if language not in LANGUAGE_CONFIG:
-        raise ValueError(f"Unsupported language: {language}")
-
-    if language == SYSTEM_LANGUAGE:
-        return
-
-    api.End()
-    SYSTEM_LANGUAGE = language
-    SOUND_DIR = "sounds/" + SYSTEM_LANGUAGE
-    api = create_tesseract_api()
-
 # os.setpriority(os.PRIO_PROCESS, 0, -10) # this causes interrupts (counter effect)
 
 # reduce image length & width by this factor before running OCR (speeds
@@ -77,7 +66,7 @@ WIDTH = 4608
 HEIGHT = 2592
 
 # columns cropped off the left and right of the camera frame before
-# OCR/finger-detection, keeping the centered square region - must match the
+# OCR, keeping the centered square region - must match the
 # [:, CROP_LEFT:CROP_RIGHT] crop in process_new_image_tesseract()
 CROP_LEFT = (WIDTH-HEIGHT)
 CROP_RIGHT = WIDTH
@@ -166,9 +155,10 @@ def wait_for_yes_no(timeout=5):
 
 def read_text_file_aloud(text=None):
 
-    if text is None:
-        text = ""
+    if text is not None:
+        speak_text_now(text)
 
+    else:
         try:
             with open("text.json", encoding="utf-8") as f:
                 data = json.load(f)
@@ -176,19 +166,16 @@ def read_text_file_aloud(text=None):
             speak_instruction(Instructions.TEXT_NOT_FOUND)
             return
 
-        if data.get("scene"):
-            text += data["scene"]
+        if not (data.get("text") or "").strip() and not (data.get("scene") or "").strip():
+            speak_instruction(Instructions.TEXT_NOT_FOUND)
+            return
 
-        text += LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["text"] + ":\n"
+        if data.get("scene"):
+            speak_text_now(data["scene"])
 
         if data.get("text"):
-            text += data["text"]
-
-    if not text.strip():
-        speak_instruction(Instructions.TEXT_NOT_FOUND)
-        return
-
-    speak_text_now(text)
+            speak_text_now(LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["text"] + ":\n")
+            speak_text_now(data["text"])
 
 
 def speak_text_now(text):
@@ -272,6 +259,20 @@ def play_waiting_sound(stop_event):
                 player.wait()
                 return
 
+def set_system_language(language):
+    global SYSTEM_LANGUAGE, SOUND_DIR, api
+
+    if language not in LANGUAGE_CONFIG:
+        raise ValueError(f"Unsupported language: {language}")
+
+    if language == SYSTEM_LANGUAGE:
+        return
+
+    api.End()
+    SYSTEM_LANGUAGE = language
+    SOUND_DIR = "sounds/" + SYSTEM_LANGUAGE
+    api = create_tesseract_api()
+    subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
 # ----------------------------------------------------------
 # Actions
 # ----------------------------------------------------------
@@ -288,20 +289,18 @@ def cleanup_photo_files():
     # since a session now takes two photos and the second one must not wipe
     # out the first photo/text.txt while they're still being processed
     subprocess.run(
-        ["rm", "-f", "text.json", CAM_IMG, "img-finger.jpg", "finger-pos.txt", "battery.txt"],
+        ["rm", "-f", "text.json", CAM_IMG, "battery.txt"],
         check=True,
     )
 
-def take_photo(name):
+def take_photo():
     # -------- profiling: checkpoints around each stage --------
     t_prev = time.perf_counter()
     global cam
     if cam is None:
         return
-
-    print("Capture image:", name)
-    if name == "img-no-finger.jpg":
-        speak_instruction(Instructions.KEEP_CAMERA)  # not in thread!
+    
+    speak_instruction(Instructions.KEEP_CAMERA)  # not in thread!
     cam.send_signal(signal.SIGUSR1)
     # --signal makes rpicam-still perform a single capture then exit - wait for
     # that exit so the file is guaranteed to be fully written before it's read
@@ -312,11 +311,9 @@ def take_photo(name):
     # cam always writes to CAM_IMG - rename to the requested name so the
     # two captures per session don't overwrite each other
     subprocess.run(["aplay", "sounds/camera_shutter.wav"], check=True) # TODO: still potential for parallel execution
-    os.replace(CAM_IMG, name)
-    if (name == "img-finger.jpg"): # TODO: nicer way to do this
-        cam.terminate()
-        cam.wait(timeout=5)
-        cam = None
+    cam.terminate()
+    cam.wait(timeout=5)
+    cam = None
     t_prev = checkpoint("capture image", t_prev)
 
 
@@ -378,30 +375,26 @@ def request_openai_text(api_key, file_id, prompt_text):
     return text
 
 
-def parse_original_and_translation(response):
-    # parses the "ORIGINAL: ...\nTRANSLATION: ..." plain-text format used by
-    # both the scene and text-detection prompts below
-    original = None
-    translation = None
-    for line in response.splitlines():
-        line = line.strip()
-        if line.startswith("ORIGINAL:"):
-            original = line[len("ORIGINAL:"):].strip()
-        elif line.startswith("TRANSLATION:"):
-            value = line[len("TRANSLATION:"):].strip()
-            translation = None if value.upper() in ("NONE", "NULL", "") else value
-    return original, translation
+def parse_api_response(response):
+
+    marker = "API_RESPONSE_TEXT:"
+
+    if marker not in response:
+        return None
+
+    return response.split(marker, 1)[1].strip()
 
 
 def process_new_image_openai():
 
     cleanup_photo_files()
-    IMAGE = "img-no-finger.jpg"
-    take_photo(IMAGE)
+    take_photo()
+
+    t_prev = time.perf_counter()
 
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-    source = cv2.imread(IMAGE)
+    source = cv2.imread(CAM_IMG)
     if source is None:
         return
 
@@ -418,6 +411,8 @@ def process_new_image_openai():
     _, encoded = cv2.imencode(".jpg", img)
 
     t = time.time()
+
+    t_prev = checkpoint("Transformed and encoded image", t_prev)
 
     try:
         stop_tick = threading.Event()
@@ -436,50 +431,53 @@ def process_new_image_openai():
 
             System language: {SYSTEM_LANGUAGE}
 
-            Respond with exactly two lines, nothing else:
-            ORIGINAL: <brief description of the scene, in its original language>
-            TRANSLATION: <translation of the description into {SYSTEM_LANGUAGE}, or the word NONE if the description is already in {SYSTEM_LANGUAGE}>
+            Respond with exactly as following, nothing else:
+            API_RESPONSE_TEXT:
+            <brief description of the scene in {SYSTEM_LANGUAGE}>
             """
         )
-        scene_text, scene_translation = parse_original_and_translation(scene_response)
+        scene_description = parse_api_response(scene_response)
         stop_tick.set()
         tick_thread.join()
         subprocess.run(["aplay", "sounds/microwave.wav"], check=False)
+
+        t_prev = checkpoint("Scene description fetched", t_prev)
 
         # read the scene aloud right away - translation if there is one,
         # otherwise the original - while the text-detection request for the
         # same image runs concurrently with speaking the scene information; join both before continuing so the
         # results below only combine once both have finished
-        text_request = {}
 
+        scene_text = ""
         def fetch_text():
-            try:
-                response = request_openai_text(
-                    OPENAI_API_KEY, file_id,
-                    f"""
-                    Extract the meaningful text from the image for a blind user.
+            response = request_openai_text(
+                OPENAI_API_KEY, file_id,
+                f"""
+                Extract the meaningful text from the image for a blind user.
 
-                    System language: {SYSTEM_LANGUAGE}
+                System language: {SYSTEM_LANGUAGE}
 
-                    Ignore:
-                    - website names, navigation, menus, category labels, ads, buttons, and repeated UI text
-                    - decorative or isolated text that does not contribute meaningful information
-                    - separators and visual punctuation such as ·
+                Ignore:
+                - website names, navigation, menus, category labels, ads, buttons, and repeated UI text
+                - decorative or isolated text that does not contribute meaningful information
+                - separators and visual punctuation such as ·
 
-                    Preserve the meaningful content naturally, including headlines, descriptions, author names, and relevant article text.
-                    Do not describe the page or add information that is not written there.
+                Preserve the meaningful content naturally, including headlines, descriptions,
+                author names, and relevant article text.
+                Preserve meaningful paragraph and line breaks.
+                Do not combine separate text blocks into a single line.
+                Do not describe the page or add information that is not written there.
 
-                    Respond with exactly two lines, nothing else:
-                    ORIGINAL: <meaningful original text, formatted naturally for speech>
-                    TRANSLATION: <translation into {SYSTEM_LANGUAGE}, or NONE if already in {SYSTEM_LANGUAGE}>
-                    """
-                )
-                text_request["text"], text_request["translation"] = parse_original_and_translation(response)
-            except ValueError as error:
-                text_request["error"] = error
+                Respond with exactly this format, nothing else:
+                API_RESPONSE_TEXT:
+                Extract the meaningful content and translate it into {SYSTEM_LANGUAGE} if not yet in {SYSTEM_LANGUAGE}.
+                """
+            )
+            nonlocal scene_text
+            scene_text = parse_api_response(response)
 
         text_thread = threading.Thread(target=fetch_text)
-        speak_thread = threading.Thread(target=speak_text_now, args=(scene_translation or scene_text,))
+        speak_thread = threading.Thread(target=speak_text_now, args=(scene_description,))
 
         text_thread.start()
         speak_thread.start()
@@ -487,32 +485,36 @@ def process_new_image_openai():
         text_thread.join()
         speak_thread.join()
 
-        if "error" in text_request:
-            raise text_request["error"]
+        t_prev = checkpoint("Text request completed", t_prev)
 
     except ValueError as e:
         print("OpenAI response error:", e)
         speak_instruction(Instructions.TEXT_NOT_FOUND)
         return
+    finally:
+        stop_tick.set()
+        tick_thread.join()
 
     print("API:", time.time() - t)
 
     result = {
-        "scene": scene_translation or scene_text,
-        "text": text_request["translation"] or text_request["text"],
+        "scene": scene_description,
+        "text": scene_text,
     }
 
     with open("text.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
-    threading.Thread(target=read_text_file_aloud, args=(text_request["translation"] or text_request["text"],)).start()
+    t_prev = checkpoint("Saving to text.json complete", t_prev)    
+
+    speak_text_now(LANGUAGE_CONFIG[SYSTEM_LANGUAGE]["text"] + ":\n")
+    threading.Thread(target=read_text_file_aloud, args=(scene_text,)).start()
 
 
 def process_new_image_tesseract():
 
     cleanup_photo_files()
-    IMAGE = "img-no-finger.jpg"
-    take_photo(IMAGE)
+    take_photo()
 
     stop_tick = threading.Event()
     tick_thread = threading.Thread(
@@ -548,7 +550,7 @@ def process_new_image_tesseract():
     # -------- profiling: checkpoints around each stage --------
     t_prev = time.perf_counter()
 
-    source = cv2.imread(IMAGE)
+    source = cv2.imread(CAM_IMG)
     if source is None:
         return
 
@@ -577,81 +579,87 @@ def process_new_image_tesseract():
 
     out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-    # -------- single tesseract call does layout analysis + OCR in one pass --------
-    # --psm 3 (fully automatic page segmentation) finds paragraph/block boxes
-    # itself, so there's no need for MSER, dilation, or a separate OCR filter step.
-    api.SetImageBytes(
-        img.tobytes(),
-        img.shape[1],
-        img.shape[0],
-        1,
-        img.shape[1]
-    )
-    api.Recognize()
-    t_prev = checkpoint("tesseract OCR", t_prev)
+    try:
+        # -------- single tesseract call does layout analysis + OCR in one pass --------
+        # --psm 3 (fully automatic page segmentation) finds paragraph/block boxes
+        # itself, so there's no need for MSER, dilation, or a separate OCR filter step.
+        api.SetImageBytes(
+            img.tobytes(),
+            img.shape[1],
+            img.shape[0],
+            1,
+            img.shape[1]
+        )
+        api.Recognize()
+        t_prev = checkpoint("tesseract OCR", t_prev)
 
-    blocks = []
+        blocks = []
 
-    ri = api.GetIterator()
-    if ri:
-        while True:  # one iteration per paragraph
-            x1, y1, x2, y2 = ri.BoundingBox(RIL.PARA)
-            para_conf = ri.Confidence(RIL.PARA)
+        ri = api.GetIterator()
+        if ri:
+            while True:  # one iteration per paragraph
+                x1, y1, x2, y2 = ri.BoundingBox(RIL.PARA)
+                para_conf = ri.Confidence(RIL.PARA)
 
-            # walk the words inside this paragraph, keeping only the ones
-            # confident enough - drops stray garbage characters/symbols
-            # Tesseract misreads from noise within an otherwise good paragraph
-            words = []
-            while True:
-                word_text = (ri.GetUTF8Text(RIL.WORD) or "").strip()
-                word_conf = ri.Confidence(RIL.WORD)
-                if word_text and word_conf >= MIN_WORD_CONF:
-                    words.append(word_text)
+                # walk the words inside this paragraph, keeping only the ones
+                # confident enough - drops stray garbage characters/symbols
+                # Tesseract misreads from noise within an otherwise good paragraph
+                words = []
+                while True:
+                    word_text = (ri.GetUTF8Text(RIL.WORD) or "").strip()
+                    word_conf = ri.Confidence(RIL.WORD)
+                    if word_text and word_conf >= MIN_WORD_CONF:
+                        words.append(word_text)
 
-                if ri.IsAtFinalElement(RIL.PARA, RIL.WORD):
+                    if ri.IsAtFinalElement(RIL.PARA, RIL.WORD):
+                        break
+                    ri.Next(RIL.WORD)
+
+                if words:
+                    blocks.append({
+                        "left": x1,
+                        "top": y1,
+                        "width": x2 - x1,
+                        "height": y2 - y1,
+                        "text": " ".join(words),
+                        "conf": para_conf,
+                    })
+
+                if not ri.Next(RIL.PARA):
                     break
-                ri.Next(RIL.WORD)
+        t_prev = checkpoint("parse tsv", t_prev)
 
-            if words:
-                blocks.append({
-                    "left": x1,
-                    "top": y1,
-                    "width": x2 - x1,
-                    "height": y2 - y1,
-                    "text": " ".join(words),
-                    "conf": para_conf,
-                })
+        # drop paragraphs with too few words or too low confidence - filters out
+        # photo/logo noise Tesseract stumbles into on --psm 3 page segmentation
+        blocks = [
+            b for b in blocks
+            if len(b["text"].split()) >= MIN_WORD_COUNT and b["conf"] >= MIN_MEAN_CONF
+        ]
 
-            if not ri.Next(RIL.PARA):
-                break
-    t_prev = checkpoint("parse tsv", t_prev)
+        t_prev = checkpoint("filter blocks", t_prev)
+        print(len(blocks))
 
-    # drop paragraphs with too few words or too low confidence - filters out
-    # photo/logo noise Tesseract stumbles into on --psm 3 page segmentation
-    blocks = [
-        b for b in blocks
-        if len(b["text"].split()) >= MIN_WORD_COUNT and b["conf"] >= MIN_MEAN_CONF
-    ]
+        data = {
+            "scene": None,
+            "text": "\n".join(b["text"] for b in blocks)
+        }
 
-    t_prev = checkpoint("filter blocks", t_prev)
-    print(len(blocks))
+        with open("text.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
-    data = {
-        "scene": None,
-        "text": "\n".join(b["text"] for b in blocks)
-    }
+        t_prev = checkpoint("write text.json", t_prev)
+    finally:
+        stop_tick.set()
+        tick_thread.join()
 
-    with open("text.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
-    t_prev = checkpoint("write text.json + words.jpg", t_prev)
+    if DEBUG:
+        for b in blocks:
+            x, y, w, h = b["left"], b["top"], b["width"], b["height"]
+            cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 1)
 
-    for b in blocks:
-        x, y, w, h = b["left"], b["top"], b["width"], b["height"]
-        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 0), 1)
-
-    cv2.imwrite("words.jpg", out)
-    t_prev = checkpoint("write text.txt + words.jpg", t_prev)
+        cv2.imwrite("words.jpg", out)
+        t_prev = checkpoint("write words.jpg", t_prev)
 
     stop_tick.set()
     tick_thread.join()
@@ -774,6 +782,10 @@ def processing_setting_loop():
             if menu_option == ProcessingSettingsMenu.TOGGLE_PROCESSING:
                 print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
                 LOCAL_PROCESSING = not LOCAL_PROCESSING
+                if (LOCAL_PROCESSING):
+                    subprocess.run(["aplay", SOUND_DIR + "/OFFLINE_MODE_SET.wav"], check=True)
+                else:
+                    subprocess.run(["aplay", SOUND_DIR + "/ONLINE_MODE_SET.wav"], check=True)
                 return
             if menu_option == ProcessingSettingsMenu.LEAVE:
                 print("Returning to settings menu")
