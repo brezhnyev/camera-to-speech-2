@@ -655,6 +655,7 @@ def process_new_image_tesseract():
 
     stop_tick.set()
     tick_thread.join()
+    subprocess.run(["aplay", "sounds/microwave.wav"], check=False)
 
     threading.Thread(target=read_text_file_aloud).start()
 
