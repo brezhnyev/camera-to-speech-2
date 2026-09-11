@@ -819,6 +819,10 @@ class MainMenu(Enum):
 def main_loop():
     print("Main loop")
     subprocess.run(["aplay", WAKEUP_WAV_PATH], check=False)
+    subprocess.run(
+        ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.75"],
+        check=False
+    )
     subprocess.run(["aplay", SOUND_DIR + "/READY_OPERATE.wav"], check=True)
     menu_option = MainMenu.TAKE_NEW_PHOTO
     wait_for_touch_flag = True
