@@ -205,7 +205,7 @@ def speak_language_menu(menu):
         LanguageMenu.GERMAN: "GERMAN",
         LanguageMenu.LEAVE: "LEAVE",
     }[menu]
-    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"], check=True)
+    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"])
 
 def speak_menu(menu):
     text = {
@@ -219,7 +219,7 @@ def speak_menu(menu):
         SettingsMenu.TOGGLE_PROCESSING: "TOGGLE_PROCESSING",
         SettingsMenu.LEAVE: "LEAVE",
     }[menu]
-    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"], check=True)
+    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"])
 
 def speak_instruction(instruction):
     text = {
@@ -230,7 +230,7 @@ def speak_instruction(instruction):
         Instructions.HAND_FOUND: "HAND_FOUND",
         Instructions.NO_HAND_FOUND: "NO_HAND_FOUND",
     }[instruction]
-    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"], check=True)
+    subprocess.run(["aplay", SOUND_DIR + "/" + text + ".wav"])
             
 
 def play_waiting_sound(stop_event):
@@ -284,7 +284,7 @@ def take_photo():
         time.sleep(0.1)
     # cam always writes to CAM_IMG - rename to the requested name so the
     # two captures per session don't overwrite each other
-    subprocess.run(["aplay", "sounds/camera_shutter.wav"], check=True) # TODO: still potential for parallel execution
+    subprocess.run(["aplay", "sounds/camera_shutter.wav"])
     cam.terminate()
     cam.wait(timeout=5)
     cam = None
@@ -413,7 +413,7 @@ def process_new_image_openai():
         scene_description = parse_api_response(scene_response)
         stop_tick.set()
         tick_thread.join()
-        subprocess.run(["aplay", "sounds/microwave.wav"], check=False)
+        subprocess.run(["aplay", "sounds/microwave.wav"])
 
         t_prev = checkpoint("Scene description fetched", t_prev)
 
@@ -637,7 +637,7 @@ def process_new_image_tesseract():
 
     stop_tick.set()
     tick_thread.join()
-    subprocess.run(["aplay", "sounds/microwave.wav"], check=False)
+    subprocess.run(["aplay", "sounds/microwave.wav"])
 
     threading.Thread(target=read_text_file_aloud).start()
 
@@ -670,8 +670,8 @@ def change_sound_level():
 def stop_reading():
 
     # nanotts owns playback directly when --play is used.
-    subprocess.run(["pkill", "-x", "nanotts"], check=False)
-    subprocess.run(["pkill", "aplay"], check=False)
+    subprocess.run(["pkill", "-x", "nanotts"])
+    subprocess.run(["pkill", "aplay"])
 
 
 # wake_up() plays a short blip of silence before the first real speech, to
@@ -699,7 +699,7 @@ _generate_wakeup_wav(WAKEUP_WAV_PATH)
 
 def wake_up():
     global cam
-    subprocess.run(["aplay", WAKEUP_WAV_PATH], check=False)
+    subprocess.run(["aplay", WAKEUP_WAV_PATH])
     cam = subprocess.Popen(
         [
             "rpicam-still",
@@ -725,14 +725,14 @@ def set_system_language(language):
         raise ValueError(f"Unsupported language: {language}")
 
     if language == SYSTEM_LANGUAGE:
-        subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
+        subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"])
         return
 
     api.End()
     SYSTEM_LANGUAGE = language
     SOUND_DIR = "sounds/" + SYSTEM_LANGUAGE
     api = create_tesseract_api()
-    subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"], check=True)
+    subprocess.run(["aplay", SOUND_DIR + "/LANGUAGE_SET.wav"])
 
 class LanguageMenu(Enum):
     ENGLISH = "EN"
@@ -762,17 +762,17 @@ def set_processing_mode():
     print("Setting processing loop")
 
     if LOCAL_PROCESSING:
-        subprocess.run(["aplay", SOUND_DIR + "/ACTIVATE_ONLINE_PROCESSING.wav"], check=True)
+        subprocess.run(["aplay", SOUND_DIR + "/ACTIVATE_ONLINE_PROCESSING.wav"])
     else:
-        subprocess.run(["aplay", SOUND_DIR + "/ACTIVATE_OFFLINE_PROCESSING.wav"], check=True)
+        subprocess.run(["aplay", SOUND_DIR + "/ACTIVATE_OFFLINE_PROCESSING.wav"])
     event = wait_for_yes_no()
     if event == True:
         print("Toggled processing mode:", "ONLINE" if LOCAL_PROCESSING else "OFFLINE")
         LOCAL_PROCESSING = not LOCAL_PROCESSING
         if (LOCAL_PROCESSING):
-            subprocess.run(["aplay", SOUND_DIR + "/OFFLINE_MODE_SET.wav"], check=True)
+            subprocess.run(["aplay", SOUND_DIR + "/OFFLINE_MODE_SET.wav"])
         else:
-            subprocess.run(["aplay", SOUND_DIR + "/ONLINE_MODE_SET.wav"], check=True)
+            subprocess.run(["aplay", SOUND_DIR + "/ONLINE_MODE_SET.wav"])
 
     return # in case of False or timeout, just return to main menu
 
@@ -838,12 +838,12 @@ class MainMenu(Enum):
 
 def main_loop():
     print("Main loop")
-    subprocess.run(["aplay", WAKEUP_WAV_PATH], check=False)
+    subprocess.run(["aplay", WAKEUP_WAV_PATH])
     subprocess.run(
         ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.75"],
         check=False
     )
-    subprocess.run(["aplay", SOUND_DIR + "/READY_OPERATE.wav"], check=True)
+    subprocess.run(["aplay", SOUND_DIR + "/READY_OPERATE.wav"])
     menu_option = MainMenu.TAKE_NEW_PHOTO
     wait_for_touch_flag = True
     global cam
@@ -911,7 +911,7 @@ if __name__ == "__main__":
         print("Exiting program")
 
         if cam is not None:
-            subprocess.run(["pkill", "rpicam-still"], check=False)
+            subprocess.run(["pkill", "rpicam-still"])
 
         if api is not None:
             api.End()
