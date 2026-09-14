@@ -234,19 +234,17 @@ def speak_instruction(instruction):
             
 
 def play_waiting_sound(stop_event):
-    while not stop_event.is_set():
-        player = subprocess.Popen(
-            ["aplay", "sounds/clock-tick.wav"],
+    player = subprocess.Popen(
+            ["play", "-q", "sounds/clock-tick.wav", "repeat", "999999"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
 
-        while player.poll() is None:
-            if stop_event.wait(0.05):
-                player.terminate()
-                player.wait()
-                return
+    while not stop_event.wait(0.1):
+        pass
 
+    player.terminate()
+    player.wait()
 # ----------------------------------------------------------
 # Actions
 # ----------------------------------------------------------
