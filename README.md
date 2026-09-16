@@ -1,5 +1,7 @@
 # Camera2Speech
-
+<br>
+![](./images/device-example.jpg)
+<br>
 A wearable Raspberry Pi Zero 2 based OCR-to-speech device inspired by OrCam MyEye 2.
 
 ## Goal
