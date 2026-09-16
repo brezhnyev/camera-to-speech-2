@@ -22,13 +22,13 @@ Reference commercial product:
 
 **In the following videos - all the sounds (except the background music) are recorded directly from the device - this is exactly what the user listens in his/her earphones.**
 
-Read offline<br>
+### Read offline<br>
 The offline mode may be used only for text recognition now - no other detection is possible (objects, faces, etc). The so called TTS (text-to-speach) processing is running locally on the device. In this case no online connection is needed.
 <br>
 <video controls width="1080" src="images/read-offline.mp4"></video>
 <br>
 
-Read online<br>
+### Read online<br>
 In the online mode the device connects over internet to the OpenAI API to upload the images for their processing on the OpenAI server. The returned information includes:
 1. Short description of the scene and
 2. Exact (translation) of the recognized text.
@@ -36,26 +36,26 @@ In the online mode the device connects over internet to the OpenAI API to upload
 <video controls width="1080" src="images/read-online.mp4"></video>
 <br>
 
-Read and translate<br>
+### Read and translate<br>
 In this demo video - the user is opening English internet page - the returned result is translation into system language (German in this case).
 <br>
 <video controls width="1080" src="images/read-and-translate.mp4"></video>
 <br>
 
-Objects recognition<br>
+### Objects recognition<br>
 If there is no meaningful text to read - the online mode can still return valuable information about the world with short description of the scene.
 <br>
 <video controls width="1080" src="images/object-recognition.mp4"></video>
 <br>
 
-Change language
+### Change language
 In the current implementation only English and German languages are available.
 <br>
 <video controls width="1080" src="images/change-language.mp4"></video>
 <br>
 ---
 
-## Overall size: 80x35x18 mm, weight: 50 mg
+## Overall size (L x H x W): 80 x 35 x 18 mm, weight: 50 mg
 
 ![](./images/20260916_150743.jpg)<br>
 ![](./images/20260916_150756.jpg)<br>
