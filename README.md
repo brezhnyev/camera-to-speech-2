@@ -18,6 +18,8 @@ Reference commercial product:
 
 ## Live examples:
 
+**In the following videos - all the sounds (except the background music) are recorded directly the device - this is exactly what the user listens in his/her earphones.**
+
 Read offline
 <br>
 <video controls width="1080" src="images/read-offline.mp4"></video>
