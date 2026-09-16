@@ -16,7 +16,39 @@ Reference commercial product:
 
 * OrCam MyEye 2
 
+## Live examples:
+
+Read offline
+<br>
+<video controls width="1080" src="images/read-offline.mp4"></video>
+<br>
+
+Read online
+<br>
+<video controls width="1080" src="images/read-online.mp4"></video>
+<br>
+
+Read and translate
+<br>
+<video controls width="1080" src="images/read-and-translate.mp4"></video>
+<br>
+
+Objects recognition
+<br>
+<video controls width="1080" src="images/object-recognition.mp4"></video>
+<br>
+
+Change language
+<br>
+<video controls width="1080" src="images/change-language.mp4"></video>
+<br>
 ---
+
+## Overall size: 80x35x18 mm, weight: 50 mg
+
+![](./images/20260916_150743.jpg)
+![](./images/20260916_150756.jpg)
+![](./images/20260916_150801.jpg)
 
 ## Hardware
 
@@ -62,83 +94,6 @@ Touch sensor:<br>
 ### Operating System
 
 * Raspberry Pi OS Lite 64 bit
-
----
-
-## Processing Pipeline
-
-```text
-USB Camera
-    ->
-fswebcam
-    ->
-ffmpeg
-    ->
-tesseract
-    ->
-RHVoice / piper
-    ->
-aplay
-```
-
-### Image Acquisition
-
-```bash
-rpicam-still -n --immediate --width 2592 --height 1944 -o img.jpg
-```
-
-### Image Preprocessing
-
-Examples:
-
-```bash
-ffmpeg -y -i img.jpg -vf "format=gray,normalize" gray.jpg
-```
-
-or
-
-```bash
-ffmpeg -y -i img.jpg -vf "format=gray,histeq" gray.jpg
-```
-
-### OCR
-
-```bash
-tesseract gray.jpg output -l eng
-```
-
-### Text To Speech
-
-```bash
-cat output.txt | RHVoice-test -p alan
-```
-
-### Audio Playback
-
-```bash
-aplay
-```
-
----
-
-## Cam2Speech.py
-
-Current implementation:
-
-* waits for user trigger
-* captures image
-* preprocesses image
-* performs OCR
-* converts text to speech
-* plays speech through headphone jack
-
-
-### Automatic Script Start
-TODO: change to running the python Cam2Speech.py on start
-
-The script starts automatically after boot.
-
----
 
 ### Typical CPU consumption.
 
@@ -292,25 +247,6 @@ echo "Alice thought she might as well go back, and see how the game was going on
 
 ![Internet page](./images/words-internet-page.png)
 
-### Overall size and weight
-Weight about 70 grams
-Overall size: 80 x 35 x 17 mm (not counting screws heads)
+First version of the device:
 
-### Battery duration
-In idle mode (only raspi OS is running) the capacity reduces by ~10% within one hour making expected idle work 10 hours.
-Intensive use of algos (tesseract) may reduce the time significantly (expedted ~2 hours).
-
-### Pictures of the device
-
-![](./images/20260727_170054.jpg)
-![](./images/20260727_170109.jpg)
-![](./images/20260727_170323.jpg)
-![](./images/20260727_170359.jpg)
-![](./images/20260727_170410.jpg)
-![](./images/20260727_170422.jpg)
-![](./images/20260727_170445.jpg)
-![](./images/20260727_170454.jpg)
-![](./images/20260804_110119.jpg)
-![](./images/20260804_110623.jpg)
-![](./images/20260804_110631.jpg)
-![](./images/20260804_110717.jpg)
+[Version 1](version-1.md)
