@@ -50,9 +50,11 @@ Change language
 
 ## Overall size: 80x35x18 mm, weight: 50 mg
 
-![](./images/20260916_150743.jpg)
-![](./images/20260916_150756.jpg)
-![](./images/20260916_150801.jpg)
+![](./images/20260916_150743.jpg)<br>
+![](./images/20260916_150756.jpg)<br>
+![](./images/20260916_150801.jpg)<br>
+![](./images/20260916_155100.jpg)<br>
+![](./images/20260916_155152.jpg)<br>
 
 ## Hardware
 
