@@ -18,6 +18,26 @@ Reference commercial product:
 
 * OrCam MyEye 2
 
+## Comparison with other systems
+
+| Criterion | **This device** | **OrCam MyEye** | **Seeing AI / Envision AI** | **Ray-Ban Meta** |
+|---|---|---|---|---|
+| **Price** | 🟢 **~€100** in components | 🔴 **Several thousand €** | 🟢 **Free** | 🟡 **~€419–499** |
+| **Works without a smartphone** | 🟢 **Yes** | 🟢 **Yes** | 🔴 **No** | 🔴 **No** – smartphone + app required |
+| **Simple physical operation** | 🟢 **Yes** – touch + gestures, designed specifically for this purpose | 🟢 **Yes** – designed as an assistive device | 🔴 Smartphone touchscreen, apps, notifications, OS interaction, etc. | 🟢 Voice/glasses controls, but smartphone still required |
+| **OCR / reading text aloud** | 🟢 **Yes** | 🟢 **Yes** | 🟢 **Yes** | 🟢 **Yes** |
+| **Scene description / AI** | 🟢 **Yes** – optional online processing with OpenAI API. The online mode increases significantly the abilities of the device: it can additionally recognize objects, translate texts and describe scenes. | 🟡 Limited depending on model | 🟢 **Yes** | 🟢 **Yes** |
+| **Offline operation** | 🟢 **Yes** – basic OCR + TTS run locally | 🟢 **Yes** – essential functions work locally | 🟡/🔴 Partially; some functions require Internet access | 🔴 AI functions largely depend on online services |
+| **Can still read text without Internet** | 🟢 **Yes** | 🟢 **Yes** | 🟡 Depends on app/function | 🔴/🟡 Limited |
+| **Can be used with the user's own glasses** | 🟢 **Yes** – separate wearable device | 🟢 **Yes** – attaches to glasses | 🟢 **Yes** – smartphone based | 🟡 Ray-Ban is itself the eyewear; prescription lenses are available |
+| **Languages can be extended** | 🟢 **Yes** – OCR/TTS components can be replaced or added | 🔴/🟡 Depends on OrCam firmware/licensing | 🟢 Many languages | 🟡 Depends on Meta |
+| **Risk of manufacturer removing/changing features** | 🟢 **Very low** | 🔴 Proprietary system | 🔴 Proprietary apps/cloud services | 🔴 Proprietary ecosystem |
+| **Open Source / maintainability** | 🟢 **Yes – Open Source / GPL; software can be maintained, modified and individual components replaced** | 🔴 **No** | 🔴 **No** | 🔴 **No** |
+| **Privacy / sensitive documents** | 🟢 **Offline processing available** | 🟢 Offline processing available | 🟡/🔴 Cloud functions involved | 🔴 Cloud/Meta ecosystem |
+| **Product maturity** | 🔴 **Prototype** | 🟢 **Commercial assistive device** | 🟢 **Established apps** | 🟢 **Commercial product** |
+| **Designed specifically for blind users** | 🟢 **Yes** | 🟢 **Yes** | 🟢 **Yes** | 🔴 Originally a general-purpose smart/media glasses product |
+| **Operating time** | 🟢 **~4–8 hours**, depending on usage intensity | 🟡 1.5-2 hours if intensively used | 🟢 Limited mainly by smartphone battery | 🟡 Depends on usage |
+
 ## Live examples:
 
 **In the following videos - all the sounds (except the background music) are recorded directly from the device - this is exactly what the user listens in his/her earphones.**
